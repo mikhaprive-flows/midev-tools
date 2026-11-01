@@ -6,6 +6,7 @@ Requires zero external dependencies (100% Python standard library).
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -77,6 +78,7 @@ def build(ctx):
 class MCPServer:
     def __init__(self):
         self.running = True
+        self._stdout = sys.__stdout__ or sys.stdout
         self.cfg = MidevConfig.load()
         artkit.apply_config(self.cfg)
 
@@ -87,8 +89,8 @@ class MCPServer:
             "result": result,
         }
         raw = json.dumps(msg) + "\n"
-        sys.stdout.write(raw)
-        sys.stdout.flush()
+        self._stdout.write(raw)
+        self._stdout.flush()
 
     def send_error(self, response_id: Any, code: int, message: str, data: Any = None):
         msg = {
@@ -101,8 +103,8 @@ class MCPServer:
             },
         }
         raw = json.dumps(msg) + "\n"
-        sys.stdout.write(raw)
-        sys.stdout.flush()
+        self._stdout.write(raw)
+        self._stdout.flush()
 
     def handle_initialize(self, req_id: Any, params: dict[str, Any]):
         self.send_response(
@@ -235,82 +237,91 @@ class MCPServer:
         name = params.get("name")
         args = params.get("arguments", {})
 
-        try:
-            if name == "midev_list_recipes":
-                proj_arg = args.get("project")
-                if proj_arg:
-                    projects.set_active_project(proj_arg)
+        # Safety belt: redirect stdout to stderr during tool execution
+        # to ensure user recipes or helpers calling print() never pollute the JSON-RPC stream
+        with contextlib.redirect_stdout(sys.stderr):
+            try:
+                if name == "midev_list_recipes":
+                    proj_arg = args.get("project")
+                    if proj_arg:
+                        projects.set_active_project(proj_arg)
+                        self.cfg = MidevConfig.load()
+                        artkit.apply_config(self.cfg)
+                    active = projects.get_active_project()
+                    recs = [p.stem for p in artkit.recipes()]
+                    res_data = {
+                        "activeProject": active.to_dict(),
+                        "recipes": recs,
+                        "total": len(recs),
+                        "palette": self.cfg.palette,
+                    }
+                    self.send_tool_result(req_id, res_data)
+
+                elif name == "midev_build_recipe":
+                    rec_list = args.get("recipes", [])
+                    pal_override = args.get("palette")
+                    force = args.get("force", True)
+                    if pal_override:
+                        artkit.apply_config(self.cfg, palette_override=pal_override)
+                    res = artkit.build_recipes(rec_list, force=force)
+                    self.send_tool_result(req_id, {
+                        "status": res.status,
+                        "project": res.project,
+                        "recipesBuilt": res.built,
+                        "skipped": res.skipped,
+                        "errors": res.errors,
+                        "validation": res.validation,
+                        "outputDir": str(artkit.CONFIG.output_dir),
+                    })
+
+                elif name == "midev_inspect_recipe":
+                    rec = args.get("recipe")
+                    scale = int(args.get("scale", 4))
+                    sheet_data = inspect_tool.generate_inspection_sheet(rec, scale=scale)
+                    self.send_tool_result(req_id, sheet_data)
+
+                elif name == "midev_validate_assets":
+                    target = args.get("target")
+                    t_path = Path(target) if target else None
+                    val = artkit.validate_assets(t_path)
+                    self.send_tool_result(req_id, {
+                        "status": val.status,
+                        "violations": val.violations,
+                        "totalAssets": val.total_assets,
+                        "failedAssets": [a for a in val.assets if not a.get("passed")],
+                        "targetDir": str(t_path or artkit.CONFIG.output_dir),
+                    })
+
+                elif name == "midev_get_canvas_docs":
+                    self.send_tool_result(req_id, {"docs": CANVAS_CHEATSHEET})
+
+                elif name == "midev_switch_project":
+                    pid = args.get("project_id", "")
+                    switched = projects.set_active_project(pid)
                     self.cfg = MidevConfig.load()
                     artkit.apply_config(self.cfg)
-                active = projects.get_active_project()
-                recs = [p.stem for p in artkit.recipes()]
-                res_data = {
-                    "activeProject": active.to_dict(),
-                    "recipes": recs,
-                    "total": len(recs),
-                    "palette": self.cfg.palette,
-                }
-                self.send_tool_result(req_id, res_data)
+                    self.send_tool_result(req_id, {
+                        "status": "ok",
+                        "switchedTo": switched.to_dict(),
+                    })
 
-            elif name == "midev_build_recipe":
-                rec_list = args.get("recipes", [])
-                pal_override = args.get("palette")
-                force = args.get("force", True)
-                if pal_override:
-                    artkit.apply_config(self.cfg, palette_override=pal_override)
-                ret = artkit.cmd_build(rec_list, force=force)
-                self.send_tool_result(req_id, {
-                    "status": "ok" if ret == 0 else "error",
-                    "exitCode": ret,
-                    "recipesBuilt": rec_list or [p.stem for p in artkit.recipes()],
-                    "outputDir": str(artkit.CONFIG.output_dir),
-                })
+                elif name == "midev_generate_template":
+                    t_name = args.get("name", "")
+                    t_kind = args.get("template", "character")
+                    ret = artkit.cmd_new(t_name, template_type=t_kind)
+                    self.send_tool_result(req_id, {
+                        "status": "ok" if ret == 0 else "error",
+                        "recipe": t_name,
+                        "template": t_kind,
+                        "path": str(artkit.CONFIG.recipes_dir / f"{t_name}.py"),
+                    })
 
-            elif name == "midev_inspect_recipe":
-                rec = args.get("recipe")
-                scale = int(args.get("scale", 4))
-                sheet_data = inspect_tool.generate_inspection_sheet(rec, scale=scale)
-                self.send_tool_result(req_id, sheet_data)
+                else:
+                    self.send_error(req_id, -32601, f"Unknown tool: {name}")
 
-            elif name == "midev_validate_assets":
-                target = args.get("target")
-                t_path = Path(target) if target else None
-                bad_count = artkit.cmd_validate(t_path)
-                self.send_tool_result(req_id, {
-                    "status": "passed" if bad_count == 0 else "failed",
-                    "violations": bad_count,
-                    "targetDir": str(t_path or artkit.CONFIG.output_dir),
-                })
-
-            elif name == "midev_get_canvas_docs":
-                self.send_tool_result(req_id, {"docs": CANVAS_CHEATSHEET})
-
-            elif name == "midev_switch_project":
-                pid = args.get("project_id", "")
-                switched = projects.set_active_project(pid)
-                self.cfg = MidevConfig.load()
-                artkit.apply_config(self.cfg)
-                self.send_tool_result(req_id, {
-                    "status": "ok",
-                    "switchedTo": switched.to_dict(),
-                })
-
-            elif name == "midev_generate_template":
-                t_name = args.get("name", "")
-                t_kind = args.get("template", "character")
-                ret = artkit.cmd_new(t_name, template_type=t_kind)
-                self.send_tool_result(req_id, {
-                    "status": "ok" if ret == 0 else "error",
-                    "recipe": t_name,
-                    "template": t_kind,
-                    "path": str(artkit.CONFIG.recipes_dir / f"{t_name}.py"),
-                })
-
-            else:
-                self.send_error(req_id, -32601, f"Unknown tool: {name}")
-
-        except Exception as e:
-            self.send_error(req_id, -32000, f"Tool execution failed: {str(e)}")
+            except Exception as e:
+                import traceback
+                self.send_error(req_id, -32000, f"Tool execution failed: {e}", data={"traceback": traceback.format_exc()})
 
     def send_tool_result(self, req_id: Any, payload: Any):
         text = json.dumps(payload, indent=2) if not isinstance(payload, str) else payload

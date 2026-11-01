@@ -12,6 +12,13 @@ from .native import NativeExporter
 from .slices import SlicesExporter
 from .texturepacker import TexturePackerExporter
 
+try:
+    from log import log
+except ImportError:
+    import sys
+    def log(msg: str, *args, **kwargs):
+        print(msg, *args, file=sys.stderr, **kwargs)
+
 EXPORTERS: dict[str, BaseExporter] = {
     "native": NativeExporter(),
     "godot": GodotExporter(),
@@ -48,12 +55,12 @@ def run_exporters(info: SheetInfo, out_dir: Path, formats: Sequence[str] | None 
     for fmt in deduped:
         exp = get_exporter(fmt)
         if exp is None:
-            print(f"[exporter] Warning: Unknown exporter format '{fmt}' (available: {', '.join(list_available_exporters())})")
+            log(f"[exporter] Warning: Unknown exporter format '{fmt}' (available: {', '.join(list_available_exporters())})")
             continue
         try:
             res = exp.export(info, out_dir)
             created_files.extend(res)
         except Exception as e:
-            print(f"[exporter] Error in exporter '{fmt}' for {info.name}: {e}")
+            log(f"[exporter] Error in exporter '{fmt}' for {info.name}: {e}")
 
     return created_files
