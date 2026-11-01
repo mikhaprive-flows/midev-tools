@@ -5,9 +5,13 @@ Usage:
   tools\\art.ps1 list                             # list available recipes
   tools\\art.ps1 new <name>                       # scaffold a new recipe from _template.py
   tools\\art.ps1 build [recipe ...]              # build specified (or all) recipes to configured output
-  tools\\art.ps1 build --out <dir> [recipe ...]   # build to custom destination directory
-  tools\\art.ps1 validate [--out <dir>]           # validate palette, alpha, and sheet sizes
+  tools\\art.ps1 build --incremental             # build only modified recipes (skip unchanged)
   tools\\art.ps1 build --clean                    # clean output directory before building
+  tools\\art.ps1 watch [recipe]                   # start live file watcher with hot-reloading
+  tools\\art.ps1 doctor                           # run environment diagnostics
+  tools\\art.ps1 info                             # display project configuration overview
+  tools\\art.ps1 palette [list|inspect <name>]   # inspect available palettes
+  tools\\art.ps1 validate [--target <dir>]        # validate palette, alpha, and sheet sizes
 
 Recipes are plain Python files in art_src/recipes exposing `build(ctx)`.
 Configuration is read from config/midev.config.json.
@@ -23,15 +27,19 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import pixelkit
+from cache import BuildCache
 from config import MidevConfig
+from diagnostics import run_doctor, show_info
 from pixelkit import PAL, ROOT
+from watcher import RecipeWatcher
 from PIL import Image
 
-# Global active configuration
+# Global active configuration & cache
 CONFIG = MidevConfig.load()
 RECIPES = CONFIG.recipes_dir
 CURRENT_OUT_DIR = CONFIG.output_dir
 CURRENT_PREVIEW_DIR = CONFIG.previews_dir
+CACHE = BuildCache()
 
 
 def apply_config(
@@ -153,19 +161,29 @@ def recipes():
     return sorted(p for p in RECIPES.glob("*.py") if not p.name.startswith("_"))
 
 
-def cmd_build(names: list[str], clean: bool = False) -> int:
+def cmd_build(names: list[str], clean: bool = False, incremental: bool = False, force: bool = False) -> int:
     all_recipes = recipes()
     todo = [p for p in all_recipes if not names or p.stem in names]
     if not todo:
         print("[artkit] No matching recipes found."); return 1
 
     if clean:
+        CACHE.clear()
         if CURRENT_OUT_DIR.exists():
             print(f"[artkit] Cleaning output dir: {CURRENT_OUT_DIR}")
             shutil.rmtree(CURRENT_OUT_DIR, ignore_errors=True)
         if CURRENT_PREVIEW_DIR.exists():
             print(f"[artkit] Cleaning preview dir: {CURRENT_PREVIEW_DIR}")
             shutil.rmtree(CURRENT_PREVIEW_DIR, ignore_errors=True)
+
+    pal_key = pixelkit.PAL.path.stem if pixelkit.PAL.path else "default"
+    exps = pixelkit.ACTIVE_EXPORTERS
+
+    if incremental and not force:
+        todo = [p for p in todo if CACHE.is_dirty(p, pal_key, exps)]
+        if not todo:
+            print(f"[artkit] All {len(all_recipes)} recipes are up-to-date (use --force to rebuild).")
+            return 0
 
     ctx = Ctx(CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR)
     for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
@@ -175,7 +193,9 @@ def cmd_build(names: list[str], clean: bool = False) -> int:
     for p in todo:
         print(f"[art] {p.stem} ...", flush=True)
         load(p).build(ctx)
+        CACHE.record(p, pal_key, exps)
 
+    CACHE.save()
     return cmd_validate(ctx.assets)
 
 
@@ -289,6 +309,28 @@ def cmd_palette_inspect(name: str) -> int:
         return 1
 
 
+def cmd_watch(target_recipe: str | None = None) -> int:
+    config_file = ROOT / "config" / "midev.config.json"
+
+    def on_recipe_changed(name: str) -> int:
+        return cmd_build([name])
+
+    def on_config_changed():
+        new_cfg = MidevConfig.load(config_file)
+        apply_config(new_cfg)
+        print(f"[watch] Configuration reloaded. Active exporters: {', '.join(new_cfg.exporters)}")
+
+    watcher = RecipeWatcher(
+        recipes_dir=RECIPES,
+        config_path=config_file,
+        on_recipe_changed=on_recipe_changed,
+        on_config_changed=on_config_changed,
+        target_recipe=target_recipe,
+    )
+    watcher.start()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", "-c", type=str, default=None, help="Path to config file (default: config/midev.config.json)")
@@ -305,6 +347,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub_build = subparsers.add_parser("build", parents=[common], help="Build art recipes")
     sub_build.add_argument("recipes", nargs="*", default=[], help="Specific recipes to build (omit for all)")
+    sub_build.add_argument("--incremental", "-i", action="store_true", help="Build only modified recipes")
+    sub_build.add_argument("--force", action="store_true", help="Force rebuild all recipes bypassing cache")
 
     sub_validate = subparsers.add_parser("validate", parents=[common], help="Validate compiled assets")
     sub_validate.add_argument("--target", "-t", type=str, default=None, help="Directory to validate")
@@ -315,6 +359,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub_palette = subparsers.add_parser("palette", parents=[common], help="Palette inspection and management")
     sub_palette.add_argument("sub_action", choices=["list", "inspect"], nargs="?", default="list", help="Palette action")
     sub_palette.add_argument("pal_name", nargs="?", default=None, help="Palette name to inspect")
+
+    sub_watch = subparsers.add_parser("watch", parents=[common], help="Start live file watcher with hot-reloading")
+    sub_watch.add_argument("recipe", nargs="?", default=None, help="Specific recipe to watch (optional)")
+
+    subparsers.add_parser("doctor", parents=[common], help="Run system and environment diagnostics")
+    subparsers.add_parser("info", parents=[common], help="Display active project configuration overview")
 
     return parser
 
@@ -331,7 +381,7 @@ def main(argv: list[str]) -> int:
     # Fallback to positional parsing for backwards compatibility with "art.ps1 build chest"
     if not cmd and argv:
         first = argv[0]
-        if first in ("build", "validate", "new", "list", "palette"):
+        if first in ("build", "validate", "new", "list", "palette", "watch", "doctor", "info"):
             cmd = first
             argv = argv[1:]
         elif not first.startswith("-"):
@@ -339,6 +389,14 @@ def main(argv: list[str]) -> int:
 
     if cmd == "list":
         return cmd_list()
+    elif cmd == "doctor":
+        return run_doctor()
+    elif cmd == "info":
+        show_info(CONFIG)
+        return 0
+    elif cmd == "watch":
+        target = getattr(args, "recipe", None) or (argv[0] if argv and not argv[0].startswith("-") else None)
+        return cmd_watch(target)
     elif cmd == "palette":
         action = getattr(args, "sub_action", "list")
         pal_target = getattr(args, "pal_name", None)
@@ -366,7 +424,9 @@ def main(argv: list[str]) -> int:
         if not target_recipes:
             target_recipes = [a for a in unknown if not a.startswith("-")]
         clean_flag = getattr(args, "clean", False) or ("--clean" in unknown) or ("--clean" in argv)
-        return cmd_build(target_recipes, clean=clean_flag)
+        inc_flag = getattr(args, "incremental", False) or ("--incremental" in unknown) or ("-i" in unknown)
+        force_flag = getattr(args, "force", False) or ("--force" in unknown)
+        return cmd_build(target_recipes, clean=clean_flag, incremental=inc_flag, force=force_flag)
     elif cmd == "validate":
         target_dir = getattr(args, "target", None)
         return cmd_validate(Path(target_dir) if target_dir else None)

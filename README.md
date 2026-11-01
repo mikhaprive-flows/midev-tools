@@ -48,6 +48,20 @@ This creates a local `.venv` under `tools/.venv` and installs dependencies (`pil
 # Clean output directory before building
 .\tools\art.ps1 build --clean
 
+# Incremental build (skip unchanged recipes)
+.\tools\art.ps1 build --incremental
+
+# Force rebuild all recipes bypassing cache
+.\tools\art.ps1 build --force
+
+# Live File Watcher (Hot-Reload on file save)
+.\tools\art.ps1 watch
+.\tools\art.ps1 watch hero
+
+# System diagnostics & project info
+.\tools\art.ps1 doctor
+.\tools\art.ps1 info
+
 # Palette management & inspection
 .\tools\art.ps1 palette list
 .\tools\art.ps1 palette inspect pico8
