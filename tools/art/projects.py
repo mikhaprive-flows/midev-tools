@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from config import ROOT_DIR, MidevConfig
-from safepath import is_within, validate_name
+from safepath import assert_safe_output_dir, is_within, validate_name
 
 
 @dataclass
@@ -135,10 +135,20 @@ def _load_project_dir(d: Path, kind: str, active_id: str) -> ProjectInfo:
             palette = cdata.get("palette", palette)
             if "output_dir" in cdata:
                 raw_out = Path(cdata["output_dir"])
-                out_dir = raw_out if raw_out.is_absolute() else (ROOT_DIR / raw_out).resolve()
+                candidate_out = raw_out if raw_out.is_absolute() else (ROOT_DIR / raw_out).resolve()
+                try:
+                    assert_safe_output_dir(candidate_out)
+                    out_dir = candidate_out
+                except ValueError:
+                    pass
             if "previews_dir" in cdata:
                 raw_prev = Path(cdata["previews_dir"])
-                prev_dir = raw_prev if raw_prev.is_absolute() else (ROOT_DIR / raw_prev).resolve()
+                candidate_prev = raw_prev if raw_prev.is_absolute() else (ROOT_DIR / raw_prev).resolve()
+                try:
+                    assert_safe_output_dir(candidate_prev)
+                    prev_dir = candidate_prev
+                except ValueError:
+                    pass
             if "exporters" in cdata:
                 exporters = cdata["exporters"]
             description = cdata.get("description", description)

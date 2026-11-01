@@ -48,3 +48,31 @@ def assert_safe_output_dir(p: Path, allow_external: bool = False):
 
     if not allow_external and not is_within(rp, ROOT_DIR):
         raise ValueError(f"Output directory outside workspace requires explicit approval: {rp}")
+
+
+def safe_clean_output_dir(d: Path, allow_external: bool = False):
+    """
+    Safely clean an output directory. Refuses foreign or dangerous directories.
+    Requires target to be either inside ROOT_DIR/export or contain '.midev-output'.
+    """
+    import shutil
+    assert_safe_output_dir(d, allow_external=allow_external)
+    export_root = (ROOT_DIR / "export").resolve()
+    is_in_export = is_within(d, export_root)
+    marker = d / ".midev-output"
+
+    if not is_in_export and not marker.exists():
+        raise ValueError(
+            f"Refusing to clean unsafe directory '{d}'. Target is neither inside '{export_root}' "
+            f"nor marked with '.midev-output'."
+        )
+
+    if d.exists():
+        for child in list(d.iterdir()):
+            if child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+            elif child.is_file():
+                try:
+                    child.unlink()
+                except OSError:
+                    pass

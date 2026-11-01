@@ -29,7 +29,7 @@ from generators import (
     VFXGenerator,
 )
 from pixelkit import PAL, ROOT
-from safepath import is_within, validate_name
+from safepath import assert_safe_output_dir, is_within, safe_clean_output_dir, validate_name
 from watcher import RecipeWatcher
 from PIL import Image
 
@@ -47,12 +47,25 @@ def apply_config(
     preview_override: str | None = None,
     palette_override: str | None = None,
     format_override: str | None = None,
+    allow_external_output: bool = False,
 ):
     global CONFIG, RECIPES, CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR
     CONFIG = cfg
     RECIPES = cfg.recipes_dir
-    CURRENT_OUT_DIR = Path(out_override).resolve() if out_override else cfg.output_dir
-    CURRENT_PREVIEW_DIR = Path(preview_override).resolve() if preview_override else cfg.previews_dir
+
+    if out_override:
+        p_out = Path(out_override).resolve()
+        assert_safe_output_dir(p_out, allow_external=allow_external_output)
+        CURRENT_OUT_DIR = p_out
+    else:
+        CURRENT_OUT_DIR = cfg.output_dir
+
+    if preview_override:
+        p_prev = Path(preview_override).resolve()
+        assert_safe_output_dir(p_prev, allow_external=allow_external_output)
+        CURRENT_PREVIEW_DIR = p_prev
+    else:
+        CURRENT_PREVIEW_DIR = cfg.previews_dir
 
     pal_name = palette_override or cfg.palette
     if pal_name:
@@ -323,10 +336,18 @@ def build_recipes(
 
     if clean:
         CACHE.clear()
-        if out.exists():
-            shutil.rmtree(out, ignore_errors=True)
-        if prev.exists():
-            shutil.rmtree(prev, ignore_errors=True)
+        try:
+            safe_clean_output_dir(out)
+            safe_clean_output_dir(prev)
+        except Exception as e:
+            return BuildResult(
+                status="error",
+                project=proj_id,
+                built=[],
+                skipped=[],
+                errors=[{"recipe": "clean", "error": str(e), "traceback": ""}],
+                validation=ValidationResult(status="failed", violations=1, total_assets=0, assets=[]).to_dict(),
+            )
 
     pal_key = pixelkit.PAL.path.stem if (pixelkit.PAL and pixelkit.PAL.path) else "default"
     exps = pixelkit.ACTIVE_EXPORTERS
@@ -343,6 +364,12 @@ def build_recipes(
     ctx = Ctx(out, prev)
     for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
         d.mkdir(parents=True, exist_ok=True)
+
+    try:
+        (ctx.assets / ".midev-output").write_text("midev build output\n", encoding="utf-8")
+        (ctx.preview / ".midev-output").write_text("midev build preview\n", encoding="utf-8")
+    except OSError:
+        pass
 
     for p in todo:
         _clean_recipe_output(p.stem, ctx.assets)
