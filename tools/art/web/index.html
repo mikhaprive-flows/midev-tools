@@ -21,10 +21,17 @@
 
   <!-- Studio Layout -->
   <div class="studio-layout">
-    <!-- Left Sidebar: Recipe Navigation -->
+    <!-- Left Sidebar: Asset & Recipe Navigation -->
     <aside class="sidebar">
       <div class="search-box">
-        <input type="text" id="searchInput" placeholder="Search recipes (e.g. player, chest)...">
+        <input type="text" id="searchInput" placeholder="Search assets (e.g. player, chest, terrain)...">
+      </div>
+      <div class="category-tabs" id="categoryTabs">
+        <button class="cat-pill active" data-cat="all">All</button>
+        <button class="cat-pill" data-cat="sprites">Sprites</button>
+        <button class="cat-pill" data-cat="tiles">Tiles</button>
+        <button class="cat-pill" data-cat="ui">UI</button>
+        <button class="cat-pill" data-cat="backgrounds">BGs</button>
       </div>
       <ul class="recipe-list" id="recipeList">
         <!-- Rendered dynamically -->
@@ -36,12 +43,12 @@
       <!-- Controls Bar -->
       <div class="controls-bar">
         <div class="playback-controls">
-          <select id="animSelect" class="select">
+          <select id="animSelect" class="select" title="Select Animation">
             <!-- Animations list -->
           </select>
           <button id="playBtn" class="btn btn-primary">❚❚ Pause</button>
-          <button id="prevFrameBtn" class="btn">⏮</button>
-          <button id="nextFrameBtn" class="btn">⏭</button>
+          <button id="prevFrameBtn" class="btn" title="Previous Frame">⏮</button>
+          <button id="nextFrameBtn" class="btn" title="Next Frame">⏭</button>
           <div class="fps-container">
             <span>Speed:</span>
             <input type="range" id="fpsSlider" min="1" max="60" value="10">
@@ -54,6 +61,7 @@
             <option value="1">1x Scale</option>
             <option value="2">2x Scale</option>
             <option value="4" selected>4x Scale</option>
+            <option value="6">6x Scale</option>
             <option value="8">8x Scale</option>
           </select>
           <button id="toggleOrigin" class="btn btn-primary" title="Toggle Origin Crosshair">Origin</button>
@@ -76,7 +84,15 @@
     <!-- Right Inspector Panel -->
     <aside class="inspector">
       <div class="inspector-section">
-        <h3 id="inspRecipeName">Recipe Inspector</h3>
+        <h3 id="inspRecipeName">Asset Inspector</h3>
+        <div class="prop-row">
+          <span class="prop-label">Category</span>
+          <span class="prop-val" id="inspCategory">-</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Source Recipe</span>
+          <span class="prop-val" id="inspSourceRecipe">-</span>
+        </div>
         <div class="prop-row">
           <span class="prop-label">Frame Size</span>
           <span class="prop-val" id="inspFrameSize">-</span>
@@ -98,19 +114,19 @@
           <span class="prop-val" id="inspAnimFrames">-</span>
         </div>
         <div class="prop-row">
-          <span class="prop-label">Default FPS</span>
+          <span class="prop-label">Base FPS</span>
           <span class="prop-val" id="inspAnimFps">-</span>
         </div>
         <div class="prop-row">
-          <span class="prop-label">Looping</span>
+          <span class="prop-label">Loops</span>
           <span class="prop-val" id="inspAnimLoop">-</span>
         </div>
       </div>
 
       <div class="inspector-section">
-        <h3>Export Files</h3>
+        <h3>Engine Exports</h3>
         <div class="export-links" id="exportLinks">
-          <!-- Download links rendered dynamically -->
+          <!-- Rendered dynamically -->
         </div>
       </div>
     </aside>

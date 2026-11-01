@@ -122,16 +122,16 @@ def main(argv: list[str]) -> int:
     subparsers.add_parser("info", help="Query GitHub repository information")
 
     sub_commit = subparsers.add_parser("commit", help="Stage changes and create a commit")
-    sub_commit.add_argument("-m", "--message", default="Update midev-tools", help="Commit message")
-    sub_commit.add_argument("paths", nargs="*", default=[], help="Specific paths to stage")
+    sub_commit.add_argument("-m", "--message", default=None, help="Commit message")
+    sub_commit.add_argument("args", nargs="*", default=[], help="Commit message or paths")
 
     sub_push = subparsers.add_parser("push", help="Push commits to remote")
     sub_push.add_argument("-b", "--branch", default="main", help="Branch name (default: main)")
 
     sub_sync = subparsers.add_parser("sync", help="Stage, commit, pull --rebase, and push in one step")
-    sub_sync.add_argument("-m", "--message", default="Update midev-tools", help="Commit message")
+    sub_sync.add_argument("-m", "--message", default=None, help="Commit message")
     sub_sync.add_argument("-b", "--branch", default="main", help="Branch name (default: main)")
-    sub_sync.add_argument("paths", nargs="*", default=[], help="Specific paths to stage")
+    sub_sync.add_argument("args", nargs="*", default=[], help="Commit message or paths")
 
     args = parser.parse_args(argv)
 
@@ -140,11 +140,25 @@ def main(argv: list[str]) -> int:
     elif args.action == "status":
         return cmd_status()
     elif args.action == "commit":
-        return cmd_commit(args.message, args.paths)
+        msg = args.message
+        paths = []
+        if not msg and args.args:
+            msg = args.args[0]
+            paths = args.args[1:]
+        elif args.args:
+            paths = args.args
+        return cmd_commit(msg or "Update midev-tools", paths)
     elif args.action == "push":
         return cmd_push(args.branch)
     elif args.action == "sync":
-        return cmd_sync(args.message, args.paths, args.branch)
+        msg = args.message
+        paths = []
+        if not msg and args.args:
+            msg = args.args[0]
+            paths = args.args[1:]
+        elif args.args:
+            paths = args.args
+        return cmd_sync(msg or "Update midev-tools", paths, args.branch)
     else:
         # Default to status if no action specified
         return cmd_status()

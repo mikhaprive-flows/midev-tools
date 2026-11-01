@@ -125,6 +125,40 @@ aside.sidebar {
   border-color: var(--accent-cyan);
 }
 
+.category-tabs {
+  display: flex;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-panel);
+  overflow-x: auto;
+}
+
+.cat-pill {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 8px;
+  border-radius: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+
+.cat-pill:hover {
+  color: var(--text-main);
+  border-color: var(--accent-cyan);
+}
+
+.cat-pill.active {
+  background: #00ffcc22;
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+  font-weight: 600;
+}
+
 .recipe-list {
   flex: 1;
   overflow-y: auto;
@@ -132,16 +166,38 @@ aside.sidebar {
 }
 
 .recipe-item {
-  padding: 10px 14px;
+  padding: 8px 12px;
   display: flex;
   align-items: center;
   justify-content: space-between;
   cursor: pointer;
   border-bottom: 1px solid rgba(255, 255, 255, 0.03);
   font-family: var(--font-mono);
-  font-size: 13px;
+  font-size: 12px;
   transition: all 0.15s ease;
 }
+
+.recipe-item .item-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+
+.item-badge {
+  font-size: 9px;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+}
+
+.badge-sprites { color: #00ffcc; background: rgba(0, 255, 204, 0.1); border: 1px solid rgba(0, 255, 204, 0.25); }
+.badge-tiles { color: #ffd23a; background: rgba(255, 210, 58, 0.1); border: 1px solid rgba(255, 210, 58, 0.25); }
+.badge-ui { color: #a78bfa; background: rgba(167, 139, 250, 0.1); border: 1px solid rgba(167, 139, 250, 0.25); }
+.badge-backgrounds { color: #f472b6; background: rgba(244, 114, 182, 0.1); border: 1px solid rgba(244, 114, 182, 0.25); }
 
 .recipe-item:hover {
   background-color: var(--bg-card);
