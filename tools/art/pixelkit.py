@@ -21,83 +21,31 @@ from typing import Iterable, Sequence
 
 from PIL import Image, ImageDraw
 
+import palette_kit
+from palette_kit import (
+    RGBA,
+    Palette,
+    PaletteManager,
+    hex_to_rgba,
+    rgba_to_hex,
+    recolor_image,
+    apply_tint,
+    make_ramp,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
-PALETTE_FILE = Path(__file__).parent / "palettes" / "fisharium32.hex"
+PALETTES_DIR = Path(__file__).parent / "palettes"
+PALETTE_FILE = PALETTES_DIR / "fisharium32.hex"
 
-RGBA = tuple[int, int, int, int]
-
-
-# ---------------------------------------------------------------- palette
-def hex_to_rgba(h: str, a: int = 255) -> RGBA:
-    h = h.strip().lstrip("#")
-    return (int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16), a)
-
-
-class Palette:
-    def __init__(self, path: Path = PALETTE_FILE):
-        self.names: dict[str, RGBA] = {}
-        self.colors: list[RGBA] = []
-        for line in path.read_text().splitlines():
-            line = line.split(";")[0].strip()
-            if not line:
-                continue
-            parts = line.split()
-            col = hex_to_rgba(parts[0])
-            if len(parts) < 2 or parts[1] != "preview_bg":  # preview-only color is not paintable
-                self.colors.append(col)
-            if len(parts) > 1:
-                self.names[parts[1]] = col
-
-    def __getitem__(self, key: str | int) -> RGBA:
-        if isinstance(key, int):
-            return self.colors[key]
-        if key.startswith("#"):
-            return hex_to_rgba(key)
-        return self.names[key]
-
-    def nearest(self, c: RGBA) -> RGBA:
-        r, g, b, a = c
-        if a < 128:
-            return (0, 0, 0, 0)
-        best = min(self.colors, key=lambda p: (p[0] - r) ** 2 * 3 + (p[1] - g) ** 2 * 4 + (p[2] - b) ** 2 * 2)
-        return best
-
-    def snap(self, img: Image.Image) -> Image.Image:
-        """Force every pixel onto the palette; alpha becomes binary (0 or 255)."""
-        img = img.convert("RGBA")
-        cache: dict[RGBA, RGBA] = {}
-        px = img.load()
-        for y in range(img.height):
-            for x in range(img.width):
-                c = px[x, y]
-                if c not in cache:
-                    cache[c] = self.nearest(c)
-                px[x, y] = cache[c]
-        return img
-
-    def violations(self, img: Image.Image) -> int:
-        allowed = set(self.colors)
-        return sum(1 for c in img.convert("RGBA").getdata() if c[3] != 0 and c not in allowed)
-
-
-PAL = Palette()
+PAL_MANAGER = PaletteManager(PALETTES_DIR)
+PAL = PAL_MANAGER.get("fisharium32")
 
 
 def set_active_palette(name_or_path: str | Path) -> Palette:
     """Switch active palette by name (in palettes/) or direct file path."""
     global PAL
-    p = Path(name_or_path)
-    if not p.is_absolute():
-        pal_dir = Path(__file__).parent / "palettes"
-        cand = pal_dir / (f"{name_or_path}.hex" if not str(name_or_path).endswith(".hex") else str(name_or_path))
-        if cand.exists():
-            p = cand
-        else:
-            p = ROOT / name_or_path
-    if p.exists():
-        PAL = Palette(p)
-        return PAL
-    raise FileNotFoundError(f"Palette not found: {name_or_path} (resolved to {p})")
+    PAL = PAL_MANAGER.get(name_or_path)
+    return PAL
 
 
 # ---------------------------------------------------------------- raster canvas
@@ -176,6 +124,18 @@ class Canvas:
         c.img = self.img.transpose(Image.FLIP_LEFT_RIGHT)
         c.d = ImageDraw.Draw(c.img)
         return c
+
+    def recolor(self, color_map: dict[str | RGBA, str | RGBA]):
+        """Replace colors in-place according to color_map."""
+        self.img = recolor_image(self.img, color_map, PAL)
+        self.d = ImageDraw.Draw(self.img)
+        return self
+
+    def tint(self, tint_color: str | RGBA, strength: float = 0.3):
+        """Apply ambient tint in-place and snap back to active palette."""
+        self.img = apply_tint(self.img, tint_color, strength=strength, palette=PAL)
+        self.d = ImageDraw.Draw(self.img)
+        return self
 
     def done(self) -> Image.Image:
         return PAL.snap(self.img)

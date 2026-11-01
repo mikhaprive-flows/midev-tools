@@ -258,6 +258,37 @@ def cmd_list() -> int:
     return 0
 
 
+def cmd_palette_list() -> int:
+    palettes = pixelkit.PAL_MANAGER.list_all()
+    print(f"\nAvailable Palettes ({len(palettes)}):")
+    print(f"{'NAME':<16} {'FORMAT':<8} {'COLORS':<8} {'NAMED':<8} {'FILE'}")
+    print("-" * 55)
+    for p in palettes:
+        print(f"{p['name']:<16} {p['format']:<8} {p['color_count']:<8} {p['named_count']:<8} {p['filename']}")
+    print()
+    return 0
+
+
+def cmd_palette_inspect(name: str) -> int:
+    try:
+        info = pixelkit.PAL_MANAGER.inspect(name)
+        print(f"\nPalette: {info['name']} ({len(info['colors'])} colors, file: {info['filename']})")
+        print(f"Preview BG : {info['preview_bg']}")
+        if info["named_colors"]:
+            print("\nNamed colors:")
+            for n, hex_val in sorted(info["named_colors"].items()):
+                print(f"  {n:<16} {hex_val}")
+        print("\nAll Hex Swatches:")
+        chunks = [info["colors"][i:i+8] for i in range(0, len(info["colors"]), 8)]
+        for chunk in chunks:
+            print("  " + " ".join(chunk))
+        print()
+        return 0
+    except Exception as e:
+        print(f"[artkit] Error inspecting palette '{name}': {e}")
+        return 1
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", "-c", type=str, default=None, help="Path to config file (default: config/midev.config.json)")
@@ -281,6 +312,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub_new = subparsers.add_parser("new", parents=[common], help="Scaffold a new recipe")
     sub_new.add_argument("name", type=str, help="Recipe name")
 
+    sub_palette = subparsers.add_parser("palette", parents=[common], help="Palette inspection and management")
+    sub_palette.add_argument("sub_action", choices=["list", "inspect"], nargs="?", default="list", help="Palette action")
+    sub_palette.add_argument("pal_name", nargs="?", default=None, help="Palette name to inspect")
+
     return parser
 
 
@@ -296,7 +331,7 @@ def main(argv: list[str]) -> int:
     # Fallback to positional parsing for backwards compatibility with "art.ps1 build chest"
     if not cmd and argv:
         first = argv[0]
-        if first in ("build", "validate", "new", "list"):
+        if first in ("build", "validate", "new", "list", "palette"):
             cmd = first
             argv = argv[1:]
         elif not first.startswith("-"):
@@ -304,6 +339,22 @@ def main(argv: list[str]) -> int:
 
     if cmd == "list":
         return cmd_list()
+    elif cmd == "palette":
+        action = getattr(args, "sub_action", "list")
+        pal_target = getattr(args, "pal_name", None)
+        if not pal_target and unknown:
+            for u in unknown:
+                if not u.startswith("-"):
+                    if not action or action == "list":
+                        action = u
+                    else:
+                        pal_target = u
+        if action == "inspect":
+            if not pal_target:
+                print("[artkit] Error: Palette name required. Usage: artkit palette inspect <name>")
+                return 1
+            return cmd_palette_inspect(pal_target)
+        return cmd_palette_list()
     elif cmd == "new":
         name = getattr(args, "name", None) or (argv[0] if argv else None)
         if not name:

@@ -48,6 +48,15 @@ This creates a local `.venv` under `tools/.venv` and installs dependencies (`pil
 # Clean output directory before building
 .\tools\art.ps1 build --clean
 
+# Palette management & inspection
+.\tools\art.ps1 palette list
+.\tools\art.ps1 palette inspect pico8
+.\tools\art.ps1 palette inspect dawnbringer32
+
+# Build with a specific palette (pico8, dawnbringer32, endesga32, gameboy4, fisharium32)
+.\tools\art.ps1 build hero --palette pico8
+.\tools\art.ps1 build hero --palette gameboy4
+
 # Validate generated art assets
 .\tools\art.ps1 validate
 ```

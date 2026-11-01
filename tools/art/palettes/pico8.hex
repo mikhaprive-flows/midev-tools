@@ -1,0 +1,18 @@
+; PICO-8 Fantasy Console 16-color palette
+#000000 black
+#1d2b53 dark_blue
+#7e2553 dark_purple
+#008751 dark_green
+#ab5236 brown
+#5f574f dark_gray
+#c2c3c7 light_gray
+#fff1e8 white
+#ff004d red
+#ffa300 orange
+#ffec27 yellow
+#00e436 green
+#29adff blue
+#83769c indigo
+#ff77a8 pink
+#ffccaa peach
+#101018 preview_bg
