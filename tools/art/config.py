@@ -23,6 +23,7 @@ class MidevConfig:
     palette: str = "fisharium32"
     enforce_palette: bool = True
     binary_alpha: bool = True
+    exporters: list[str] = field(default_factory=lambda: ["native", "godot"])
     subdirs: dict[str, str] = field(
         default_factory=lambda: {
             "sprites": "sprites",
@@ -59,6 +60,9 @@ class MidevConfig:
                 cfg.palette = defaults.get("palette", cfg.palette)
                 cfg.enforce_palette = defaults.get("enforce_palette", cfg.enforce_palette)
                 cfg.binary_alpha = defaults.get("binary_alpha", cfg.binary_alpha)
+
+                if "exporters" in data and isinstance(data["exporters"], list):
+                    cfg.exporters = data["exporters"]
 
                 if "subdirs" in data and isinstance(data["subdirs"], dict):
                     cfg.subdirs.update(data["subdirs"])

@@ -12,6 +12,10 @@
     "enforce_palette": true,
     "binary_alpha": true
   },
+  "exporters": [
+    "native",
+    "godot"
+  ],
   "subdirs": {
     "sprites": "sprites",
     "tiles": "tiles",

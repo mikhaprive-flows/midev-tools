@@ -36,6 +36,18 @@ This creates a local `.venv` under `tools/.venv` and installs dependencies (`pil
 # Build all recipes
 .\tools\art.ps1 build
 
+# Build with specific engine export formats (godot, texturepacker, slices, native, all)
+.\tools\art.ps1 build hero --format godot
+.\tools\art.ps1 build hero --format texturepacker
+.\tools\art.ps1 build hero --format slices
+.\tools\art.ps1 build hero --format all
+
+# Build directly to external game engine directory
+.\tools\art.ps1 build --out "F:/MyGodotGame/assets/sprites" --format godot
+
+# Clean output directory before building
+.\tools\art.ps1 build --clean
+
 # Validate generated art assets
 .\tools\art.ps1 validate
 ```

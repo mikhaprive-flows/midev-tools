@@ -17,7 +17,7 @@ import json
 import math
 import io
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Sequence
 
 from PIL import Image, ImageDraw
 
@@ -202,6 +202,14 @@ def hexc(name: str) -> str:
     return f"#{r:02x}{g:02x}{b:02x}"
 
 
+ACTIVE_EXPORTERS: list[str] = ["native", "godot"]
+
+
+def set_active_exporters(formats: Sequence[str]):
+    global ACTIVE_EXPORTERS
+    ACTIVE_EXPORTERS = list(formats)
+
+
 # ---------------------------------------------------------------- sprite sheets
 class SheetBuilder:
     """Packs animations into a grid: one row per animation, frames left->right.
@@ -219,19 +227,41 @@ class SheetBuilder:
         self.anims.append((anim, fr, fps, loop))
         return self
 
-    def save(self, out_dir: Path) -> Path:
+    def save(self, out_dir: Path, formats: Sequence[str] | None = None) -> Path:
         out_dir.mkdir(parents=True, exist_ok=True)
         cols = max(len(a[1]) for a in self.anims)
         sheet = Image.new("RGBA", (cols * self.fw, len(self.anims) * self.fh), (0, 0, 0, 0))
-        meta = {"name": self.name, "frameWidth": self.fw, "frameHeight": self.fh,
-                "originX": self.origin[0], "originY": self.origin[1], "animations": {}}
         for row, (anim, frames, fps, loop) in enumerate(self.anims):
             for i, f in enumerate(frames):
                 sheet.paste(f, (i * self.fw, row * self.fh))
-            meta["animations"][anim] = {"row": row, "frames": len(frames), "fps": fps, "loop": loop}
         png = out_dir / f"{self.name}.png"
         sheet.save(png)
-        (out_dir / f"{self.name}.json").write_text(json.dumps(meta, indent=2))
+
+        try:
+            from exporters import SheetInfo, AnimationData, run_exporters
+            anim_data = [
+                AnimationData(name=anim, frames=frames, fps=fps, loop=loop, row=row)
+                for row, (anim, frames, fps, loop) in enumerate(self.anims)
+            ]
+            info = SheetInfo(
+                name=self.name,
+                fw=self.fw,
+                fh=self.fh,
+                origin=self.origin,
+                anims=anim_data,
+                sheet_width=sheet.width,
+                sheet_height=sheet.height,
+                image_path=png,
+            )
+            target_formats = formats or ACTIVE_EXPORTERS
+            run_exporters(info, out_dir, target_formats)
+        except Exception as e:
+            # Fallback to basic JSON if exporter subsystem fails
+            meta = {"name": self.name, "frameWidth": self.fw, "frameHeight": self.fh,
+                    "originX": self.origin[0], "originY": self.origin[1], "animations": {}}
+            for row, (anim, frames, fps, loop) in enumerate(self.anims):
+                meta["animations"][anim] = {"row": row, "frames": len(frames), "fps": fps, "loop": loop}
+            (out_dir / f"{self.name}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         return png
 
     def preview_gif(self, out_dir: Path, scale: int = 4):

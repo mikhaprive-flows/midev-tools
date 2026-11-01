@@ -34,7 +34,13 @@ CURRENT_OUT_DIR = CONFIG.output_dir
 CURRENT_PREVIEW_DIR = CONFIG.previews_dir
 
 
-def apply_config(cfg: MidevConfig, out_override: str | None = None, preview_override: str | None = None, palette_override: str | None = None):
+def apply_config(
+    cfg: MidevConfig,
+    out_override: str | None = None,
+    preview_override: str | None = None,
+    palette_override: str | None = None,
+    format_override: str | None = None,
+):
     global CONFIG, RECIPES, CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR
     CONFIG = cfg
     RECIPES = cfg.recipes_dir
@@ -47,6 +53,13 @@ def apply_config(cfg: MidevConfig, out_override: str | None = None, preview_over
             pixelkit.set_active_palette(pal_name)
         except Exception as e:
             print(f"[artkit] Warning: Could not set palette '{pal_name}': {e}")
+
+    # Set active exporter formats
+    if format_override:
+        formats = [f.strip() for f in format_override.split(",") if f.strip()]
+    else:
+        formats = cfg.exporters
+    pixelkit.set_active_exporters(formats)
 
 
 class Canvas(pixelkit.Canvas):
@@ -251,6 +264,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--out", "-o", type=str, default=None, help="Output directory for generated assets")
     common.add_argument("--preview", "-p", type=str, default=None, help="Output directory for preview GIFs/PNGs")
     common.add_argument("--palette", type=str, default=None, help="Active palette name or file")
+    common.add_argument("--format", "-f", type=str, default=None, help="Export format(s): godot, texturepacker, slices, native, all")
     common.add_argument("--clean", action="store_true", help="Clean output directory before building")
 
     parser = argparse.ArgumentParser(prog="artkit", parents=[common], description="midev-tools code-generated game art pipeline")
@@ -276,7 +290,7 @@ def main(argv: list[str]) -> int:
 
     # Load configuration
     cfg = MidevConfig.load(args.config)
-    apply_config(cfg, out_override=args.out, preview_override=args.preview, palette_override=args.palette)
+    apply_config(cfg, out_override=args.out, preview_override=args.preview, palette_override=args.palette, format_override=args.format)
 
     cmd = args.command
     # Fallback to positional parsing for backwards compatibility with "art.ps1 build chest"
