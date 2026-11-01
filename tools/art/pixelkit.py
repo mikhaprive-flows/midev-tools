@@ -95,12 +95,30 @@ class Canvas:
         self.d.line([int(x0), int(y0), int(x1), int(y1)], fill=self.col(c))
         return self
 
-    def ellipse(self, x, y, w, h, c):
-        self.d.ellipse([int(x), int(y), int(x + w - 1), int(y + h - 1)], fill=self.col(c))
+    @property
+    def pal(self):
+        return PAL
+
+    def ellipse(self, x, y, w, h, c, fill: bool = True):
+        box = [int(x), int(y), int(x + w - 1), int(y + h - 1)]
+        if fill:
+            self.d.ellipse(box, fill=self.col(c))
+        else:
+            self.d.ellipse(box, outline=self.col(c))
         return self
 
-    def circle(self, cx, cy, r, c):
-        return self.ellipse(cx - r, cy - r, 2 * r + 1, 2 * r + 1, c)
+    oval = ellipse
+
+    def circle(self, cx, cy, r, c, fill: bool = True):
+        return self.ellipse(cx - r, cy - r, 2 * r + 1, 2 * r + 1, c, fill=fill)
+
+    def poly(self, points, c, fill: bool = True):
+        pts = [(int(px), int(py)) for px, py in points]
+        if fill:
+            self.d.polygon(pts, fill=self.col(c))
+        else:
+            self.d.polygon(pts, outline=self.col(c))
+        return self
 
     def dither(self, x, y, w, h, c, phase=0):
         """Checkerboard dither - classic 16/32-bit shading trick."""
@@ -110,16 +128,20 @@ class Canvas:
                     self.px(x + i, y + j, c)
         return self
 
-    def outline(self, c="outline"):
+    def outline(self, c="outline", *, color=None, diag: bool = False):
         """Add a 1px outline around all opaque pixels (selective outline look)."""
+        actual_c = color if color is not None else c
         src = self.img.copy()
         s = src.load()
-        oc = self.col(c)
+        oc = self.col(actual_c)
+        neighbors = ((1, 0), (-1, 0), (0, 1), (0, -1))
+        if diag:
+            neighbors = ((1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (-1, 1), (1, -1), (-1, -1))
         for y in range(self.h):
             for x in range(self.w):
                 if s[x, y][3] != 0:
                     continue
-                for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                for dx, dy in neighbors:
                     nx, ny = x + dx, y + dy
                     if 0 <= nx < self.w and 0 <= ny < self.h and s[nx, ny][3] != 0 and s[nx, ny] != oc:
                         self.img.putpixel((x, y), oc)

@@ -151,6 +151,18 @@ class Palette:
                 if col not in self.colors:
                     self.colors.append(col)
 
+    def __contains__(self, key: str | int) -> bool:
+        if isinstance(key, int):
+            return 0 <= key < len(self.colors)
+        if isinstance(key, str):
+            k = key.lower().strip()
+            if k in self.names:
+                return True
+            if k in SEMANTIC_FALLBACKS:
+                return any(fb in self.names for fb in SEMANTIC_FALLBACKS[k])
+            return False
+        return False
+
     def __getitem__(self, key: str | int) -> RGBA:
         if isinstance(key, int):
             return self.colors[key % len(self.colors)] if self.colors else (0, 0, 0, 255)
