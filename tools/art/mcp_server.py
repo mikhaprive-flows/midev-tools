@@ -21,6 +21,7 @@ import artkit
 import inspect_tool
 import projects
 from config import MidevConfig
+from safepath import validate_name
 
 CANVAS_CHEATSHEET = """# midev pixelkit.Canvas API Cheat Sheet for AI Agents
 
@@ -259,6 +260,17 @@ class MCPServer:
 
                 elif name == "midev_build_recipe":
                     rec_list = args.get("recipes", [])
+                    known_recipes = {p.stem for p in artkit.recipes()}
+                    for r in rec_list:
+                        try:
+                            validate_name(r, "recipe name")
+                        except ValueError as e:
+                            self.send_error(req_id, -32602, str(e))
+                            return
+                        if r not in known_recipes:
+                            self.send_error(req_id, -32602, f"Recipe not found: '{r}'. Available recipes: {sorted(list(known_recipes))}")
+                            return
+
                     pal_override = args.get("palette")
                     force = args.get("force", True)
                     if pal_override:
@@ -308,6 +320,11 @@ class MCPServer:
                 elif name == "midev_generate_template":
                     t_name = args.get("name", "")
                     t_kind = args.get("template", "character")
+                    try:
+                        t_name = validate_name(t_name, "recipe name")
+                    except ValueError as e:
+                        self.send_error(req_id, -32602, str(e))
+                        return
                     ret = artkit.cmd_new(t_name, template_type=t_kind)
                     self.send_tool_result(req_id, {
                         "status": "ok" if ret == 0 else "error",

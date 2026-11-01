@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from config import ROOT_DIR, MidevConfig
+from safepath import is_within, validate_name
 
 
 @dataclass
@@ -174,32 +175,34 @@ def get_active_project() -> ProjectInfo:
 
 def set_active_project(name_or_id: str) -> ProjectInfo:
     projects = discover_projects()
-    matched: ProjectInfo | None = None
-
     target = name_or_id.lower().strip()
-    for p in projects:
-        if p.id.lower() == target or p.name.lower() == target:
-            matched = p
-            break
+
+    # Exact ID match
+    matched = [p for p in projects if p.id.lower() == target]
+    if not matched:
+        # Exact Name match
+        matched = [p for p in projects if p.name.lower() == target]
 
     if not matched:
-        # Partial match
-        for p in projects:
-            if target in p.name.lower():
-                matched = p
-                break
+        available = [p.id for p in projects]
+        raise ValueError(f"Project '{name_or_id}' not found. Available project IDs: {available}")
 
-    if not matched:
-        raise ValueError(f"Project '{name_or_id}' not found. Available: {[p.name for p in projects]}")
+    if len(matched) > 1:
+        ambiguous_ids = [p.id for p in matched]
+        raise ValueError(
+            f"Ambiguous project name '{name_or_id}'. Multiple projects found: {ambiguous_ids}. "
+            f"Please specify the full project ID (e.g. 'projects/{target}' or 'samples/{target}')."
+        )
 
+    chosen = matched[0]
     master = read_master_config()
-    master["active_project"] = matched.id
+    master["active_project"] = chosen.id
     write_master_config(master)
 
     for p in projects:
-        p.is_active = (p.id == matched.id)
+        p.is_active = (p.id == chosen.id)
 
-    return matched
+    return chosen
 
 
 def create_project(
@@ -210,8 +213,16 @@ def create_project(
     set_active: bool = True,
 ) -> ProjectInfo:
     """Scaffold a brand new game project workspace."""
-    safe_name = name.lower().strip().replace(" ", "_").replace("-", "_")
-    pdir = ROOT_DIR / "projects" / safe_name
+    raw_normalized = name.lower().strip().replace(" ", "_").replace("-", "_")
+    safe_name = validate_name(raw_normalized, "project name")
+
+    projects_root = (ROOT_DIR / "projects").resolve()
+    projects_root.mkdir(parents=True, exist_ok=True)
+
+    pdir = (projects_root / safe_name).resolve()
+    if not is_within(pdir, projects_root):
+        raise ValueError(f"Invalid project path escaping projects root: {pdir}")
+
     if pdir.exists():
         raise FileExistsError(f"Project '{safe_name}' already exists at {pdir}")
 

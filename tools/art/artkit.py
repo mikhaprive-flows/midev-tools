@@ -29,6 +29,7 @@ from generators import (
     VFXGenerator,
 )
 from pixelkit import PAL, ROOT
+from safepath import is_within, validate_name
 from watcher import RecipeWatcher
 from PIL import Image
 
@@ -434,14 +435,27 @@ def cmd_validate(target_dir: Path | None = None, as_json: bool = False) -> int:
 
 
 def cmd_new(name: str, template_type: str | None = None) -> int:
+    try:
+        safe_name = validate_name(name, "recipe name")
+    except ValueError as e:
+        print(f"[artkit] Error: {e}", file=sys.stderr)
+        return 1
+
     RECIPES.mkdir(parents=True, exist_ok=True)
-    dst = RECIPES / f"{name}.py"
+    dst = (RECIPES / f"{safe_name}.py").resolve()
+    if not is_within(dst, RECIPES):
+        print(f"[artkit] Error: Destination path is outside recipe directory: {dst}", file=sys.stderr)
+        return 1
+
     if dst.exists():
-        print(f"[artkit] Recipe already exists: {dst}"); return 1
+        print(f"[artkit] Recipe already exists: {dst}", file=sys.stderr)
+        return 1
+
+    repr_name = repr(safe_name)
 
     if template_type == "character":
         code = f'''# Author: midev generator
-"""Procedural character rig recipe for {name}."""
+"""Procedural character rig recipe for {safe_name}."""
 from pixelkit import SheetBuilder
 from generators.character import CharacterGenerator, CharacterConfig
 
@@ -458,13 +472,13 @@ def build(ctx):
         weapon="sword",
     )
     gen = CharacterGenerator(cfg)
-    sb = gen.generate_sheet("{name}")
+    sb = gen.generate_sheet({repr_name})
     sb.save(ctx.sprites)
     sb.preview_gif(ctx.preview)
 '''
     elif template_type == "autotile":
         code = f'''# Author: midev generator
-"""47-tile Wang blob autotile terrain recipe for {name}."""
+"""47-tile Wang blob autotile terrain recipe for {safe_name}."""
 from pixelkit import SheetBuilder
 from generators.autotile import AutotileGenerator, AutotileConfig
 
@@ -472,45 +486,45 @@ from generators.autotile import AutotileGenerator, AutotileConfig
 def build(ctx):
     cfg = AutotileConfig(tile_size=16, inner_color="green", outer_color="dirt")
     gen = AutotileGenerator(cfg)
-    sb = gen.generate_sheet("{name}")
+    sb = gen.generate_sheet({repr_name})
     sb.save(ctx.tiles)
     sb.preview_gif(ctx.preview)
 '''
     elif template_type == "vfx":
         code = f'''# Author: midev generator
-"""Procedural pixel-art VFX recipe for {name}."""
+"""Procedural pixel-art VFX recipe for {safe_name}."""
 from pixelkit import SheetBuilder
 from generators.vfx import VFXGenerator
 
 
 def build(ctx):
     gen = VFXGenerator(size=32)
-    sb = gen.generate_sheet("{name}")
+    sb = gen.generate_sheet({repr_name})
     sb.save(ctx.sprites)
     sb.preview_gif(ctx.preview)
 '''
     elif template_type == "ui":
         code = f'''# Author: midev generator
-"""9-slice UI kit recipe for {name}."""
+"""9-slice UI kit recipe for {safe_name}."""
 from pixelkit import SheetBuilder
 from generators.uikit import UIKitGenerator
 
 
 def build(ctx):
     gen = UIKitGenerator()
-    sb = gen.generate_sheet("{name}")
+    sb = gen.generate_sheet({repr_name})
     sb.save(ctx.ui)
     sb.preview_gif(ctx.preview)
 '''
     else:
         template = RECIPES / "_template.py"
         if template.exists():
-            code = template.read_text(encoding="utf-8").replace("TEMPLATE", name)
+            code = template.read_text(encoding="utf-8").replace("TEMPLATE", safe_name)
         else:
             code = f'''from pixelkit import Canvas, SheetBuilder
 
 def build(ctx):
-    sb = SheetBuilder("{name}", 16, 16)
+    sb = SheetBuilder({repr_name}, 16, 16)
     frames = [Canvas(16, 16).circle(8, 8, 4, "gold").outline()]
     sb.add("idle", frames, fps=6)
     sb.save(ctx.sprites)
