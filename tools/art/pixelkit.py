@@ -62,6 +62,18 @@ class Canvas:
     @property
     def h(self): return self.img.height
 
+    @property
+    def _px(self) -> dict[tuple[int, int], tuple[int, int, int, int]]:
+        """Return dict of non-transparent pixels (x, y) -> rgba."""
+        pixels = {}
+        px_access = self.img.load()
+        for y in range(self.h):
+            for x in range(self.w):
+                val = px_access[x, y]
+                if val[3] > 0:
+                    pixels[(x, y)] = val
+        return pixels
+
     @staticmethod
     def col(c) -> RGBA:
         return PAL[c] if isinstance(c, (str, int)) else c
@@ -118,6 +130,15 @@ class Canvas:
         im = other.img if isinstance(other, Canvas) else other
         self.img.alpha_composite(im.convert("RGBA"), (int(x), int(y)))
         return self
+
+    def blit(self, other: "Canvas | Image.Image", x=0, y=0):
+        return self.paste(other, x, y)
+
+    def hline(self, x: int, y: int, length: int, c):
+        return self.line(x, y, x + length - 1, y, c)
+
+    def vline(self, x: int, y: int, length: int, c):
+        return self.line(x, y, x, y + length - 1, c)
 
     def flip_x(self) -> "Canvas":
         c = Canvas(self.w, self.h)

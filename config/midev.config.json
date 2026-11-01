@@ -1,10 +1,10 @@
 {
-  "name": "midev-art-project",
-  "version": "1.0",
+  "name": "midev-art-studio",
+  "version": "1.1.0",
+  "active_project": "projects/demo_rpg",
   "paths": {
-    "recipes": "art_src/recipes",
-    "output": "export/assets",
-    "previews": "export/previews",
+    "projects": "projects",
+    "samples": "samples",
     "palettes": "tools/art/palettes"
   },
   "defaults": {
@@ -14,7 +14,9 @@
   },
   "exporters": [
     "native",
-    "godot"
+    "godot",
+    "texturepacker",
+    "slices"
   ],
   "subdirs": {
     "sprites": "sprites",

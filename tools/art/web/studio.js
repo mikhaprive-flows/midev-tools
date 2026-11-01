@@ -33,6 +33,28 @@
   const rebuildBtn = document.getElementById("rebuildBtn");
   const frameStripEl = document.getElementById("frameStrip");
   const categoryTabs = document.getElementById("categoryTabs");
+  const projectSelect = document.getElementById("projectSelect");
+
+  // Load Projects List into Header Dropdown
+  async function loadProjects() {
+    try {
+      const res = await fetch("/api/projects");
+      const data = await res.json();
+      projectSelect.innerHTML = "";
+
+      (data.projects || []).forEach((p) => {
+        const opt = document.createElement("option");
+        opt.value = p.id;
+        opt.textContent = `${p.title} (${p.recipes_count} rec)`;
+        if (p.id === data.activeId) {
+          opt.selected = true;
+        }
+        projectSelect.appendChild(opt);
+      });
+    } catch (e) {
+      console.warn("[studio] Failed to load projects:", e);
+    }
+  }
 
   // Load Asset Catalog & Initialize
   async function loadCatalog() {
@@ -47,8 +69,10 @@
       renderAssetList();
 
       const defaultId = state.catalog.defaultAssetId || (state.catalog.assets[0] ? state.catalog.assets[0].id : null);
-      if (defaultId && !state.activeAssetId) {
+      if (defaultId) {
         selectAsset(defaultId);
+      } else {
+        renderPlaceholder("No assets in this project. Use 'midev new' or 'midev generate'.");
       }
     } catch (e) {
       console.error("[studio] Failed to load asset catalog:", e);
@@ -430,6 +454,17 @@
     }
   };
 
+  projectSelect.onchange = async (e) => {
+    const selected = e.target.value;
+    try {
+      await fetch(`/api/project/switch?project=${encodeURIComponent(selected)}`, { method: "POST" });
+      state.activeAssetId = null;
+      await loadCatalog();
+    } catch (err) {
+      console.error("[studio] Failed to switch project:", err);
+    }
+  };
+
   // Live Hot-Reload Listener (SSE)
   function initLiveWatcher() {
     try {
@@ -437,7 +472,11 @@
       evtSource.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === "reload") {
+          if (data.type === "project_switched") {
+            loadProjects();
+            state.activeAssetId = null;
+            loadCatalog();
+          } else if (data.type === "reload") {
             console.log(`[studio] Live change detected: ${data.recipe}`);
             loadCatalog().then(() => {
               if (state.activeAssetId) {
@@ -456,6 +495,7 @@
   }
 
   // Startup
+  loadProjects();
   loadCatalog();
   initLiveWatcher();
   requestAnimationFrame(tick);

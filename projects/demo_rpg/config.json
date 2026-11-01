@@ -1,0 +1,15 @@
+{
+  "name": "demo_rpg",
+  "title": "Demo Rpg",
+  "version": "1.0.0",
+  "description": "Demo Rpg art asset project",
+  "palette": "pico8",
+  "output_dir": "export/projects/demo_rpg/assets",
+  "previews_dir": "export/projects/demo_rpg/previews",
+  "exporters": [
+    "native",
+    "godot",
+    "texturepacker",
+    "slices"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "fisharium",
+  "title": "Fisharium (Official Sample)",
+  "version": "1.1.0",
+  "description": "Cozy pixel-art fishing RPG asset collection (Fisharium)",
+  "palette": "fisharium32",
+  "output_dir": "export/samples/fisharium/assets",
+  "previews_dir": "export/samples/fisharium/previews",
+  "exporters": ["native", "godot", "texturepacker", "slices"]
+}

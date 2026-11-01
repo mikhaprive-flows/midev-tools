@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 from PIL import Image
 
 import artkit
+import projects
 from config import MidevConfig
 from pixelkit import ROOT
 
@@ -44,6 +45,10 @@ PRIMARY_ASSET_MAP: dict[str, str] = {
     "ui_extra": "ui/joystick_base",
     "aquarium_codex": "sprites/aquarium_tank_large",
     "player_fishing": "sprites/player_fishing",
+    "char_hero": "sprites/hero",
+    "dungeon_tiles": "tiles/dungeon_tiles",
+    "magic_fx": "sprites/magic_fx",
+    "hud_kit": "ui/hud_kit",
 }
 
 
@@ -115,10 +120,9 @@ def broadcast_event(data: dict[str, Any]):
 
 
 class StudioHandler(BaseHTTPRequestHandler):
-    server_version = "midev-Studio/1.0"
+    server_version = "midev-Studio/2.0"
 
     def log_message(self, format: str, *args):
-        # Suppress routine GET logging for cleaner terminal output
         if "/api/events" in self.path or "/studio." in self.path:
             return
         super().log_message(format, *args)
@@ -163,7 +167,17 @@ class StudioHandler(BaseHTTPRequestHandler):
                         EVENT_SUBSCRIBERS.remove(client_q)
             return
 
-        # 2. Asset Catalog Route
+        # 2. Multi-Project Routes
+        if path == "/api/projects":
+            all_projs = projects.discover_projects()
+            active = projects.get_active_project()
+            self.send_json({
+                "projects": [p.to_dict() for p in all_projs],
+                "activeId": active.id,
+            })
+            return
+
+        # 3. Asset Catalog Route
         if path == "/api/catalog":
             self.handle_get_catalog()
             return
@@ -173,7 +187,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.send_json(all_recs)
             return
 
-        # 3. Individual Asset Details Route
+        # 4. Individual Asset Details Route
         if path == "/api/asset":
             asset_id = query.get("id", [""])[0]
             if not asset_id:
@@ -189,7 +203,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.handle_get_asset(primary_asset)
             return
 
-        # 4. Static Web Dashboard Files
+        # 5. Static Web Dashboard Files
         if path in ("/", "/index.html"):
             self.serve_file(WEB_DIR / "index.html", "text/html; charset=utf-8")
             return
@@ -200,7 +214,7 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.serve_file(WEB_DIR / "studio.js", "application/javascript; charset=utf-8")
             return
 
-        # 5. Exported Assets & Previews Static Serving
+        # 6. Exported Assets & Previews Static Serving
         cfg = artkit.CONFIG
         if path.startswith("/assets/"):
             rel_path = path[len("/assets/"):].lstrip("/")
@@ -223,7 +237,37 @@ class StudioHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        query = parse_qs(parsed.query)
 
+        # Switch Active Project
+        if path in ("/api/project/switch", "/api/projects/switch") or path.startswith("/api/project/switch/"):
+            project_id = ""
+            if path.startswith("/api/project/switch/"):
+                project_id = path[len("/api/project/switch/"):].strip()
+            else:
+                content_length = int(self.headers.get("Content-Length", 0))
+                if content_length > 0:
+                    body = self.rfile.read(content_length).decode("utf-8")
+                    try:
+                        bdata = json.loads(body)
+                        project_id = bdata.get("project", "")
+                    except Exception:
+                        pass
+            if not project_id:
+                project_id = query.get("project", [""])[0]
+
+            try:
+                switched = projects.set_active_project(project_id)
+                cfg = MidevConfig.load()
+                artkit.apply_config(cfg)
+                print(f"[studio] Switched active project to: {switched.title} ({switched.id})")
+                broadcast_event({"type": "project_switched", "project": switched.id})
+                self.send_json({"status": "ok", "activeProject": switched.to_dict()})
+            except Exception as e:
+                self.send_json({"status": "error", "message": str(e)})
+            return
+
+        # Trigger Build
         if path.startswith("/api/build/"):
             target_name = path[len("/api/build/"):].strip()
             recipe_name = get_recipe_for_asset(target_name)
@@ -236,13 +280,15 @@ class StudioHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def handle_get_catalog(self):
-        cfg = artkit.CONFIG
+        # Refresh config in case project changed
+        cfg = MidevConfig.load()
+        artkit.apply_config(cfg)
         out_dir = cfg.output_dir
 
-        # Ensure output directory has assets; if totally empty, build once
+        # Ensure output directory has assets; auto-build if completely empty
         png_list = list(out_dir.rglob("*.png")) if out_dir.exists() else []
         if not png_list:
-            print("[studio] Output directory empty, auto-building all recipes...")
+            print(f"[studio] Output directory {out_dir} empty, auto-building active project recipes...")
             artkit.cmd_build([])
             png_list = list(out_dir.rglob("*.png")) if out_dir.exists() else []
 
@@ -276,11 +322,23 @@ class StudioHandler(BaseHTTPRequestHandler):
             })
 
         recipes_list = [p.stem for p in artkit.recipes()]
+        active_proj = projects.get_active_project()
+
+        # Pick smart default
+        default_asset = None
+        for candidate in ("sprites/player", "sprites/hero", "sprites/chest", "sprites/magic_fx", "tiles/dungeon_tiles", "ui/hud_kit"):
+            if any(a["id"] == candidate for a in assets):
+                default_asset = candidate
+                break
+        if not default_asset and assets:
+            default_asset = assets[0]["id"]
+
         self.send_json({
             "assets": assets,
             "recipes": recipes_list,
-            "palette": getattr(artkit.CONFIG, "palette", "fisharium32"),
-            "defaultAssetId": "sprites/player" if any(a["id"] == "sprites/player" for a in assets) else (assets[0]["id"] if assets else None),
+            "palette": cfg.palette,
+            "activeProject": active_proj.to_dict(),
+            "defaultAssetId": default_asset,
         })
 
     def handle_get_asset(self, asset_id: str):
@@ -310,7 +368,6 @@ class StudioHandler(BaseHTTPRequestHandler):
 
         recipe_name = get_recipe_for_asset(name)
 
-        # If missing on disk, build the recipe
         if not png_file.exists():
             artkit.cmd_build([recipe_name])
 
@@ -321,7 +378,6 @@ class StudioHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        # If static PNG with no JSON, synthesize clean metadata for viewer
         if png_file.exists() and not meta_data:
             try:
                 with Image.open(png_file) as im:
@@ -372,17 +428,15 @@ class StudioHandler(BaseHTTPRequestHandler):
 
 
 def start_background_watcher():
-    """Background watcher thread that signals SSE clients when recipe files change."""
-    recipes_dir = artkit.CONFIG.recipes_dir
-    mtimes: dict[Path, float] = {}
-
-    for p in recipes_dir.glob("*.py"):
-        if not p.name.startswith("_"):
-            mtimes[p] = p.stat().st_mtime
-
+    """Background watcher thread that signals SSE clients when active recipe files change."""
     def watcher_loop():
+        mtimes: dict[Path, float] = {}
         while True:
             time.sleep(0.5)
+            recipes_dir = artkit.CONFIG.recipes_dir
+            if not recipes_dir.exists():
+                continue
+
             changed = []
             for p in recipes_dir.glob("*.py"):
                 if p.name.startswith("_"):
@@ -408,24 +462,26 @@ def start_background_watcher():
 
 
 def run_studio(host: str = "127.0.0.1", port: int = 8080, open_browser: bool = True):
-    """Launch the Studio web server."""
     start_background_watcher()
 
     server_address = (host, port)
     try:
         httpd = ThreadingHTTPServer(server_address, StudioHandler)
-    except OSError as e:
+    except OSError:
         print(f"[studio] Error: Port {port} is already in use. Try a different port with --port <port>.")
         return 1
 
     url = f"http://{host}:{port}/"
-    print("\n" + "=" * 55)
-    print("  midev Live Preview Studio")
-    print("=" * 55)
-    print(f"  Web UI URL   : {url}")
-    print(f"  Hot-Reload   : SSE Active (auto-rebuild on recipe edit)")
-    print(f"  Output Dir   : {artkit.CONFIG.output_dir}")
-    print("-------------------------------------------------------")
+    active_proj = projects.get_active_project()
+    print("\n" + "=" * 60)
+    print("  midev Live Preview Studio 2.0 (Multi-Project)")
+    print("=" * 60)
+    print(f"  Web UI URL    : {url}")
+    print(f"  Active Project: {active_proj.title} ({active_proj.id})")
+    print(f"  Palette       : {artkit.CONFIG.palette}")
+    print(f"  Output Dir    : {artkit.CONFIG.output_dir}")
+    print(f"  Hot-Reload    : SSE Active (auto-rebuild on recipe edit)")
+    print("------------------------------------------------------------")
     print("  Press Ctrl+C to stop the Studio server.\n")
 
     if open_browser:
