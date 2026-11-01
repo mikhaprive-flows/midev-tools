@@ -1,0 +1,30 @@
+# Secrets & Credentials
+git_full_access_token.txt
+*.token
+.env
+.env.*
+
+# Python
+.venv/
+tools/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# Build & Preview artifacts
+build/
+dist/
+*.log
+
+# Temporary / archives
+ART.zip
+*.zip
+*.tar.gz
+*.bak
+
+# IDE & Editor
+.vscode/
+.idea/
+*.swp
+*.swo
