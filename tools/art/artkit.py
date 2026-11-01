@@ -10,7 +10,7 @@ Usage:
   tools\\art.ps1 build --clean                    # clean output directory before building
 
 Recipes are plain Python files in art_src/recipes exposing `build(ctx)`.
-Configuration is read from midev.config.json at the workspace root.
+Configuration is read from config/midev.config.json.
 """
 from __future__ import annotations
 
@@ -260,7 +260,7 @@ def cmd_list() -> int:
 
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--config", "-c", type=str, default=None, help="Path to midev.config.json")
+    common.add_argument("--config", "-c", type=str, default=None, help="Path to config file (default: config/midev.config.json)")
     common.add_argument("--out", "-o", type=str, default=None, help="Output directory for generated assets")
     common.add_argument("--preview", "-p", type=str, default=None, help="Output directory for preview GIFs/PNGs")
     common.add_argument("--palette", type=str, default=None, help="Active palette name or file")

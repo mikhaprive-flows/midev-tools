@@ -61,6 +61,8 @@ This creates a local `.venv` under `tools/.venv` and installs dependencies (`pil
 ## Directory Structure
 ```
 midev_art_tools/
+├── config/
+│   └── midev.config.json # Pipeline configuration
 ├── art_src/
 │   └── recipes/          # Python recipe scripts (*.py)
 ├── tools/

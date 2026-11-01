@@ -36,9 +36,14 @@ class MidevConfig:
     @classmethod
     def load(cls, config_path: Path | str | None = None) -> MidevConfig:
         cfg = cls()
-        p = Path(config_path) if config_path else (ROOT_DIR / "midev.config.json")
-        if not p.is_absolute():
-            p = (ROOT_DIR / p).resolve()
+        if config_path:
+            p = Path(config_path)
+            if not p.is_absolute():
+                p = (ROOT_DIR / p).resolve()
+        else:
+            p = ROOT_DIR / "config" / "midev.config.json"
+            if not p.exists():
+                p = ROOT_DIR / "midev.config.json"
 
         if p.exists():
             try:
