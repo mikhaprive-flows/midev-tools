@@ -97,6 +97,36 @@ header {
   color: var(--accent-yellow);
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.support-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(255, 94, 91, 0.15);
+  color: #ff7675;
+  border: 1px solid rgba(255, 94, 91, 0.4);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 12px;
+  text-decoration: none;
+  transition: all 0.2s ease;
+}
+
+.support-btn:hover {
+  background: #ff5e5b;
+  color: #ffffff;
+  border-color: #ff5e5b;
+  box-shadow: 0 0 10px rgba(255, 94, 91, 0.5);
+  transform: translateY(-1px);
+}
+
 .live-indicator {
   display: flex;
   align-items: center;

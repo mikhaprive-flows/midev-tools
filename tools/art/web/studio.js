@@ -497,6 +497,8 @@
   // Startup
   loadProjects();
   loadCatalog();
-  initLiveWatcher();
+  if (!window.location.search.includes("nosse=1")) {
+    initLiveWatcher();
+  }
   requestAnimationFrame(tick);
 })();

@@ -161,6 +161,28 @@ class Canvas:
     def done(self) -> Image.Image:
         return PAL.snap(self.img)
 
+    def save_png(self, path: Path | str) -> Path:
+        """Save canvas directly to PNG with active palette snapping."""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        self.done().save(p, "PNG")
+        return p
+
+    def save_ico(self, path: Path | str, sizes: list[tuple[int, int]] | None = None) -> Path:
+        """Save canvas as a multi-resolution Windows .ico icon file using crisp nearest-neighbor scaling."""
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        sizes = sizes or [(16, 16), (32, 32), (48, 48)]
+        snapped = self.done()
+        max_w = max(s[0] for s in sizes)
+        max_h = max(s[1] for s in sizes)
+        if snapped.width < max_w or snapped.height < max_h:
+            base_img = snapped.resize((max_w, max_h), Image.Resampling.NEAREST)
+        else:
+            base_img = snapped
+        base_img.save(p, format="ICO", sizes=sizes)
+        return p
+
 
 # ---------------------------------------------------------------- vector (SVG)
 def svg_frame(svg: str, w: int, h: int, snap: bool = True) -> Image.Image:

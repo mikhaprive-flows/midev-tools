@@ -14,6 +14,8 @@ Usage:
   python midev.py list                             # list all available art recipes
   python midev.py doctor                           # run environment diagnostics
   python midev.py info                             # display project configuration overview
+  python midev.py icon [path]                      # generate multi-resolution studio favicon .ico
+  python midev.py test                             # run automated test suite
   python midev.py git [status|info|sync|commit]    # manage git repository and sync
   python midev.py setup [--force]                  # bootstrap or update virtual environment
 """
@@ -92,6 +94,25 @@ def main():
     elif first == "git":
         from git_tool import main as git_main
         return git_main(argv[1:])
+
+    elif first in ("test", "tests"):
+        import unittest
+        tests_dir = ROOT_DIR / "tests"
+        if not tests_dir.exists():
+            tests_dir.mkdir(parents=True, exist_ok=True)
+        print(f"[midev] Running test suite via unittest discovery in {tests_dir}...")
+        loader = unittest.defaultTestLoader
+        suite = loader.discover(str(tests_dir), pattern="test_*.py")
+        runner = unittest.TextTestRunner(verbosity=2)
+        result = runner.run(suite)
+        return 0 if result.wasSuccessful() else 1
+
+    elif first == "icon":
+        from icon_gen import generate_studio_icon
+        target = Path(argv[1]) if len(argv) > 1 and not argv[1].startswith("-") else None
+        saved = generate_studio_icon(target)
+        print(f"[midev] Studio favicon generated: {saved}")
+        return 0
 
     else:
         # Route to artkit (build, watch, palette, validate, new, list, doctor, info)

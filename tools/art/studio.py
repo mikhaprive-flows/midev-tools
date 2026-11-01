@@ -213,6 +213,9 @@ class StudioHandler(BaseHTTPRequestHandler):
         elif path == "/studio.js":
             self.serve_file(WEB_DIR / "studio.js", "application/javascript; charset=utf-8")
             return
+        elif path == "/favicon.ico":
+            self.serve_file(WEB_DIR / "favicon.ico", "image/x-icon")
+            return
 
         # 6. Exported Assets & Previews Static Serving
         cfg = artkit.CONFIG
