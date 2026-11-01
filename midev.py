@@ -7,6 +7,7 @@ Usage:
   python midev.py build --incremental             # build only modified recipes
   python midev.py build --clean                    # clean output before building
   python midev.py watch [recipe]                   # start live file watcher with hot-reloading
+  python midev.py studio [--port 8080]             # start interactive Live Preview Studio web UI
   python midev.py palette [list|inspect <name>]   # inspect available color palettes
   python midev.py validate [--target <dir>]        # validate palette, alpha, and frame sizes
   python midev.py new <name>                       # scaffold a new recipe from _template.py

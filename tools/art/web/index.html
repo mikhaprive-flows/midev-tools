@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>midev Studio - Game Art Asset Dashboard</title>
+  <link rel="stylesheet" href="/studio.css">
+</head>
+<body>
+  <!-- Header -->
+  <header>
+    <div class="logo-area">
+      <span class="logo-tag">⚡ midev Studio</span>
+      <span class="badge" id="headerPalette">Palette: fisharium32</span>
+    </div>
+    <div class="live-indicator">
+      <div class="dot"></div>
+      <span>Hot-Reload Active</span>
+    </div>
+  </header>
+
+  <!-- Studio Layout -->
+  <div class="studio-layout">
+    <!-- Left Sidebar: Recipe Navigation -->
+    <aside class="sidebar">
+      <div class="search-box">
+        <input type="text" id="searchInput" placeholder="Search recipes (e.g. player, chest)...">
+      </div>
+      <ul class="recipe-list" id="recipeList">
+        <!-- Rendered dynamically -->
+      </ul>
+    </aside>
+
+    <!-- Center: Interactive Viewport -->
+    <main class="viewport-area">
+      <!-- Controls Bar -->
+      <div class="controls-bar">
+        <div class="playback-controls">
+          <select id="animSelect" class="select">
+            <!-- Animations list -->
+          </select>
+          <button id="playBtn" class="btn btn-primary">❚❚ Pause</button>
+          <button id="prevFrameBtn" class="btn">⏮</button>
+          <button id="nextFrameBtn" class="btn">⏭</button>
+          <div class="fps-container">
+            <span>Speed:</span>
+            <input type="range" id="fpsSlider" min="1" max="60" value="10">
+            <span id="fpsVal">10 fps</span>
+          </div>
+        </div>
+
+        <div class="view-controls">
+          <select id="zoomSelect" class="select">
+            <option value="1">1x Scale</option>
+            <option value="2">2x Scale</option>
+            <option value="4" selected>4x Scale</option>
+            <option value="8">8x Scale</option>
+          </select>
+          <button id="toggleOrigin" class="btn btn-primary" title="Toggle Origin Crosshair">Origin</button>
+          <button id="toggleGrid" class="btn" title="Toggle Pixel Grid">Grid</button>
+          <button id="rebuildBtn" class="btn" title="Trigger Rebuild">⚡ Rebuild</button>
+        </div>
+      </div>
+
+      <!-- Canvas Viewport -->
+      <div class="canvas-wrapper">
+        <canvas id="viewportCanvas"></canvas>
+      </div>
+
+      <!-- Bottom Frame Strip -->
+      <div class="frame-strip-bar" id="frameStrip">
+        <!-- Frame thumbnails rendered dynamically -->
+      </div>
+    </main>
+
+    <!-- Right Inspector Panel -->
+    <aside class="inspector">
+      <div class="inspector-section">
+        <h3 id="inspRecipeName">Recipe Inspector</h3>
+        <div class="prop-row">
+          <span class="prop-label">Frame Size</span>
+          <span class="prop-val" id="inspFrameSize">-</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Origin (X, Y)</span>
+          <span class="prop-val" id="inspOrigin">-</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Sheet Size</span>
+          <span class="prop-val" id="inspSheetSize">-</span>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <h3>Current Animation</h3>
+        <div class="prop-row">
+          <span class="prop-label">Frames</span>
+          <span class="prop-val" id="inspAnimFrames">-</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Default FPS</span>
+          <span class="prop-val" id="inspAnimFps">-</span>
+        </div>
+        <div class="prop-row">
+          <span class="prop-label">Looping</span>
+          <span class="prop-val" id="inspAnimLoop">-</span>
+        </div>
+      </div>
+
+      <div class="inspector-section">
+        <h3>Export Files</h3>
+        <div class="export-links" id="exportLinks">
+          <!-- Download links rendered dynamically -->
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <script src="/studio.js"></script>
+</body>
+</html>

@@ -331,6 +331,11 @@ def cmd_watch(target_recipe: str | None = None) -> int:
     return 0
 
 
+def cmd_studio(port: int = 8080, no_open: bool = False) -> int:
+    import studio
+    return studio.run_studio(port=port, open_browser=not no_open)
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--config", "-c", type=str, default=None, help="Path to config file (default: config/midev.config.json)")
@@ -363,6 +368,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub_watch = subparsers.add_parser("watch", parents=[common], help="Start live file watcher with hot-reloading")
     sub_watch.add_argument("recipe", nargs="?", default=None, help="Specific recipe to watch (optional)")
 
+    sub_studio = subparsers.add_parser("studio", parents=[common], help="Start interactive Live Preview Studio web UI")
+    sub_studio.add_argument("--port", type=int, default=8080, help="HTTP server port (default: 8080)")
+    sub_studio.add_argument("--no-open", action="store_true", help="Do not open browser automatically")
+
     subparsers.add_parser("doctor", parents=[common], help="Run system and environment diagnostics")
     subparsers.add_parser("info", parents=[common], help="Display active project configuration overview")
 
@@ -381,7 +390,7 @@ def main(argv: list[str]) -> int:
     # Fallback to positional parsing for backwards compatibility with "art.ps1 build chest"
     if not cmd and argv:
         first = argv[0]
-        if first in ("build", "validate", "new", "list", "palette", "watch", "doctor", "info"):
+        if first in ("build", "validate", "new", "list", "palette", "watch", "doctor", "info", "studio", "preview"):
             cmd = first
             argv = argv[1:]
         elif not first.startswith("-"):
@@ -389,6 +398,10 @@ def main(argv: list[str]) -> int:
 
     if cmd == "list":
         return cmd_list()
+    elif cmd in ("studio", "preview"):
+        port = getattr(args, "port", 8080)
+        no_open = getattr(args, "no_open", False) or ("--no-open" in unknown)
+        return cmd_studio(port=port, no_open=no_open)
     elif cmd == "doctor":
         return run_doctor()
     elif cmd == "info":

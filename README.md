@@ -67,6 +67,11 @@ python midev.py build --out "F:/MyGodotGame/assets/sprites" --format godot
 # Clean output directory before building
 python midev.py build --clean
 
+# Live Interactive Preview Studio (Web UI with animation controls & hot-reload)
+python midev.py studio
+python midev.py studio --port 8080
+python midev.py studio --no-open
+
 # Live File Watcher (auto-rebuilds and validates within milliseconds upon file save)
 python midev.py watch
 python midev.py watch hero
