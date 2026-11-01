@@ -24,11 +24,24 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
-$tokenFile = Join-Path $root "git_full_access_token.txt"
-if (-not (Test-Path $tokenFile)) {
-    throw "Missing token file: $tokenFile"
+$token = ""
+if ($env:GITHUB_TOKEN) {
+    $token = $env:GITHUB_TOKEN.Trim()
+} else {
+    $remoteUrl = git config --get remote.origin.url 2>$null
+    if ($remoteUrl -match 'https://[^:]+:([^@]+)@github\.com') {
+        $token = $Matches[1].Trim()
+    } else {
+        $tokenFile = Join-Path $root "git_full_access_token.txt"
+        if (Test-Path $tokenFile) {
+            $token = (Get-Content -Raw $tokenFile).Trim()
+        }
+    }
 }
-$token = (Get-Content -Raw $tokenFile).Trim()
+
+if ([string]::IsNullOrWhiteSpace($token)) {
+    throw "GitHub token could not be resolved from environment, git remote origin, or token file."
+}
 $headers = @{
     Authorization          = "Bearer $token"
     Accept                 = "application/vnd.github+json"

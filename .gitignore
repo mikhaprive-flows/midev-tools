@@ -15,6 +15,7 @@ __pycache__/
 # Build & Preview artifacts
 build/
 dist/
+export/
 *.log
 
 # Temporary / archives
