@@ -779,9 +779,21 @@ def cmd_palette_inspect(name: str, as_json: bool = False) -> int:
 
 
 def cmd_watch(recipe: str | None = None) -> int:
+    watcher = None
+
+    def reload_config():
+        nonlocal watcher
+        apply_config(MidevConfig.load())
+        if watcher:
+            watcher.recipes_dir = RECIPES
+            print(f"[watch] Config reloaded, active recipes dir: {RECIPES}")
+
     watcher = RecipeWatcher(
-        recipe_filter=recipe,
-        on_change=lambda paths: cmd_build([p.stem for p in paths]),
+        recipes_dir=RECIPES,
+        config_path=projects.get_master_config_path(),
+        on_recipe_changed=lambda stem: cmd_build([stem]),
+        on_config_changed=reload_config,
+        target_recipe=recipe,
     )
     watcher.start()
     return 0

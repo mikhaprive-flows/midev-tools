@@ -75,15 +75,20 @@ class RecipeWatcher:
                 if not self.recipes_dir.exists():
                     continue
 
+                current_files = set()
                 for p in self.recipes_dir.glob("*.py"):
                     if p.name.startswith("_"):
                         continue
                     if self.target_recipe and p.stem != self.target_recipe:
                         continue
 
-                    mtime = p.stat().st_mtime
-                    prev = self._mtimes.get(p, 0)
+                    current_files.add(p)
+                    try:
+                        mtime = p.stat().st_mtime
+                    except OSError:
+                        continue
 
+                    prev = self._mtimes.get(p, 0)
                     if mtime > prev:
                         self._mtimes[p] = mtime
                         last_t = self._last_trigger.get(p.stem, 0)
@@ -105,6 +110,11 @@ class RecipeWatcher:
                                 print(f"[watch {ts}] Warning: {p.stem} finished with issues ({elapsed:.0f}ms)\n")
                         except Exception as e:
                             print(f"[watch {ts}] Error building {p.stem}: {e}\n")
+
+                # Remove deleted files from tracking
+                for tracked in list(self._mtimes.keys()):
+                    if tracked != self.config_path and tracked not in current_files:
+                        del self._mtimes[tracked]
 
         except KeyboardInterrupt:
             print("\n[watch] Watcher stopped.")
