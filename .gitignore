@@ -29,3 +29,11 @@ ART.zip
 .idea/
 *.swp
 *.swo
+
+# Internal Plans & Notes (do not push to git)
+*PLAN*.md
+*plan*.md
+*.plan.md
+docs/*PLAN*
+docs/*plan*
+docs/*Plan*
