@@ -103,6 +103,12 @@ header {
   gap: 16px;
 }
 
+.support-links {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .support-btn {
   display: inline-flex;
   align-items: center;
@@ -124,6 +130,20 @@ header {
   color: #ffffff;
   border-color: #ff5e5b;
   box-shadow: 0 0 10px rgba(255, 94, 91, 0.5);
+  transform: translateY(-1px);
+}
+
+.support-btn.trakteer-btn {
+  background: rgba(190, 30, 45, 0.15);
+  color: #ff6b7d;
+  border: 1px solid rgba(190, 30, 45, 0.4);
+}
+
+.support-btn.trakteer-btn:hover {
+  background: #be1e2d;
+  color: #ffffff;
+  border-color: #be1e2d;
+  box-shadow: 0 0 10px rgba(190, 30, 45, 0.5);
   transform: translateY(-1px);
 }
 

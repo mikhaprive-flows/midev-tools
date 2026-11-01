@@ -2,11 +2,13 @@
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Tests Passing](https://img.shields.io/badge/Tests-Passing-brightgreen?style=flat-square&logo=githubactions&logoColor=white)](tests/)
+[![MCP Server](https://img.shields.io/badge/MCP-JSON--RPC%202.0-8A2BE2?style=flat-square)](tools/art/mcp_server.py)
 [![Ko-fi Support](https://img.shields.io/badge/Ko--fi-Support%20Developer-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/midevfish)
+[![Trakteer Support](https://img.shields.io/badge/Trakteer-Support%20Developer-be1e2d?style=flat-square)](https://trakteer.id/MiDevFish)
 [![Architecture](https://img.shields.io/badge/Architecture-100%25%20Pure%20Python-orange?style=flat-square)](tools/art/)
 
 `midev-tools` is a modular, standalone pixel art and vector asset generation toolkit for 2D game development.
-All assets are generated deterministically through Python recipes — making your art pipeline reproducible, reviewable, diffable, and easily scriptable.
+Built on a **Dual-Audience Architecture**: powerful and lightweight for **human programmers** writing manual code, and natively optimized for **vibe coders & AI coding agents** (Claude, Cursor, Antigravity, Windsurf) through MCP and multimodal visual verification.
 
 ---
 
@@ -25,6 +27,19 @@ Every sprite, animation frame, and outline is generated 100% deterministically f
 | Idle (Down) | Walk Cycle | Run Cycle | Dash / Dodge | Dig Action | Fishing Catch |
 | :---: | :---: | :---: | :---: | :---: | :---: |
 | ![Player Idle](docs/images/showcase/player_idle.gif) | ![Player Walk](docs/images/showcase/player_walk.gif) | ![Player Run](docs/images/showcase/player_run.gif) | ![Player Dash](docs/images/showcase/player_dash.gif) | ![Player Dig](docs/images/showcase/player_dig.gif) | ![Player Catch](docs/images/showcase/player_fishing_catch_down.gif) |
+
+---
+
+## ⚖️ Why Code-Generated Art? (The Dual-Audience Advantage)
+
+| Feature | Traditional AI (Midjourney/SD) | Hand-Drawn (Aseprite) | **midev-tools (Dual-Audience)** |
+| :--- | :--- | :--- | :--- |
+| **For Programmers** | ❌ Random pixels, no code control | ⏱️ Hours of manual pixel pushing | ✅ **100% Python Code & Math (`API_REFERENCE.md`)** |
+| **For AI Agents** | ⚠️ Vague prompt lottery | ❌ Agents cannot use a mouse GUI | ✅ **Native Python recipes + MCP Server (`AGENTS.md`)** |
+| **Style & Palette** | ❌ Inconsistent blur & bleed | ✅ Manual consistency | ✅ **Strict Deterministic snapping (0 bleeds)** |
+| **Engine Metadata** | ❌ None (raw png, no frames) | ⚠️ Manual slicing & tagging | ✅ **Auto Godot 4 .tres, TexturePacker, Slices** |
+| **Version Control** | ❌ Binary blobs cluttering Git | ❌ Binary `.ase` / `.psd` files | ✅ **Plain text Python scripts diffable in Git PRs** |
+| **Visual Feedback** | ⏱️ Re-roll 50 times | ⏱️ Slow manual iteration | ⚡ **Multimodal Inspection (`midev inspect`) in seconds** |
 
 ---
 
@@ -142,8 +157,22 @@ python midev.py studio --no-open
 python midev.py watch
 python midev.py watch player
 
+# Multimodal Visual Verification Sheet (for human review and AI agent vision)
+python midev.py inspect player
+python midev.py inspect player --scale 4
+python midev.py inspect player --json
+
+# Start Model Context Protocol (MCP) Server for Cursor / Claude Desktop / Antigravity
+python midev.py mcp
+
 # Run automated test suite
 python midev.py test
+
+# Machine-Readable Structured Output (ideal for scripts & autonomous agents)
+python midev.py build --json
+python midev.py list --json
+python midev.py doctor --json
+python midev.py project list --json
 
 # Generate / refresh studio favicon .ico
 python midev.py icon
@@ -165,7 +194,12 @@ python midev.py build player --palette gameboy4
 python midev.py validate
 ```
 
-### 5. Git Management
+### 5. Documentation & Agent Guides
+- 📖 [**Manual Programmer API Reference**](docs/API_REFERENCE.md): Complete guide to `pixelkit.Canvas`, `SheetBuilder`, math helpers, and SVG pipeline.
+- 🤖 [**AI Agent Rules & Protocol**](AGENTS.md): Strict guidelines and multimodal verification loops for autonomous coding agents.
+- 🎯 [**Cursor Configuration**](.cursorrules): Instant `.cursorrules` integration.
+
+### 6. Git Management
 ```bash
 python midev.py git status
 python midev.py git info
@@ -215,6 +249,8 @@ midev_art_tools/
 If you find `midev-tools` helpful for your game development workflow or pixel art prototyping, consider supporting ongoing development:
 
 [![Support on Ko-fi](https://img.shields.io/badge/Ko--fi-Buy%20me%20a%20coffee-FF5E5B?style=for-the-badge&logo=ko-fi&logoColor=white)](https://ko-fi.com/midevfish)
+[![Support on Trakteer](https://img.shields.io/badge/Trakteer-Traktir%20Kopi-be1e2d?style=for-the-badge)](https://trakteer.id/MiDevFish)
 
-🔗 **Ko-fi Page**: [https://ko-fi.com/midevfish](https://ko-fi.com/midevfish)
+- ☕ **Ko-fi**: [https://ko-fi.com/midevfish](https://ko-fi.com/midevfish) (International - Card / PayPal)
+- 🍨 **Trakteer**: [https://trakteer.id/MiDevFish](https://trakteer.id/MiDevFish) (Indonesia - QRIS, GoPay, OVO, Dana)
 

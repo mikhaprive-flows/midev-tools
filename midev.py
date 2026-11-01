@@ -15,6 +15,7 @@ Usage:
   python midev.py doctor                           # run environment diagnostics
   python midev.py info                             # display project configuration overview
   python midev.py icon [path]                      # generate multi-resolution studio favicon .ico
+  python midev.py mcp                              # start Model Context Protocol (MCP) stdio server
   python midev.py test                             # run automated test suite
   python midev.py git [status|info|sync|commit]    # manage git repository and sync
   python midev.py setup [--force]                  # bootstrap or update virtual environment
@@ -113,6 +114,10 @@ def main():
         saved = generate_studio_icon(target)
         print(f"[midev] Studio favicon generated: {saved}")
         return 0
+
+    elif first == "mcp":
+        import mcp_server
+        return mcp_server.main()
 
     else:
         # Route to artkit (build, watch, palette, validate, new, list, doctor, info)

@@ -1,0 +1,21 @@
+# Cursor Rules for midev-tools
+
+# You are an expert AI game artist and developer specializing in the midev-tools Python pixel-art engine.
+# Follow these rules when generating or modifying game art recipes:
+
+- **100% Deterministic Python**: All art assets must be authored in Python recipes inside `recipes/<name>.py`.
+- **Recipe Entry Point**: Every recipe script MUST implement a `build(ctx)` function.
+- **Canvas Primitives**: Use `pixelkit.Canvas` methods:
+  - `c.rect(x, y, w, h, color, fill=True)`
+  - `c.circle(cx, cy, r, color, fill=True)`
+  - `c.line(x0, y0, x1, y1, color)`
+  - `c.poly(points, color, fill=True)`
+  - `c.outline(color="black")`
+- **Motion Helpers**: Use `bob(frame, total_frames, amp)` for vertical bobbing and `swing(frame, total_frames, amp)` for limb swings.
+- **Quality Contracts**:
+  - Zero palette bleeds (only use colors from active palette).
+  - 100% binary alpha (alpha is strictly 0 or 255).
+- **Inspection Protocol**:
+  - Always run `python midev.py inspect <recipe> --json` to generate visual verification sheets.
+  - Inspect the generated sheet to verify character silhouette and frame continuity.
+- **Machine Output**: Use `python midev.py <command> --json` when executing commands from terminal.

@@ -13,23 +13,19 @@ from exporters import list_available_exporters
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
-def run_doctor() -> int:
-    print("\n" + "=" * 60)
-    print("  midev-tools System Diagnostics (doctor)")
-    print("=" * 60)
-
-    checks_passed = 0
-    checks_total = 0
+def run_doctor(as_json: bool = False) -> int:
+    checks = []
 
     def check(name: str, passed: bool, details: str = ""):
-        nonlocal checks_passed, checks_total
-        checks_total += 1
-        if passed:
-            checks_passed += 1
-            status = "[OK]  "
-        else:
-            status = "[FAIL]"
-        print(f" {status} {name:<25} {details}")
+        checks.append({"name": name, "ok": bool(passed), "details": details})
+        if not as_json:
+            status = "[OK]  " if passed else "[FAIL]"
+            print(f" {status} {name:<25} {details}")
+
+    if not as_json:
+        print("\n" + "=" * 60)
+        print("  midev-tools System Diagnostics (doctor)")
+        print("=" * 60)
 
     # 1. Python runtime
     py_ver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
@@ -92,19 +88,58 @@ def run_doctor() -> int:
     except Exception as e:
         check("Procedural Generators", False, str(e))
 
+    # 12. Visual Inspection Engine
+    try:
+        import inspect_tool
+        check("Inspection Engine", hasattr(inspect_tool, "generate_inspection_sheet"), "Multimodal verification ready")
+    except Exception as e:
+        check("Inspection Engine", False, str(e))
+
+    # 13. Model Context Protocol
+    mcp_path = ROOT_DIR / "tools" / "art" / "mcp_server.py"
+    check("MCP Agent Server", mcp_path.exists(), "JSON-RPC 2.0 stdio server ready")
+
+    passed_count = sum(1 for c in checks if c["ok"])
+    total_count = len(checks)
+
+    if as_json:
+        import json
+        payload = {
+            "status": "healthy" if passed_count == total_count else "unhealthy",
+            "passed": passed_count,
+            "total": total_count,
+            "checks": checks,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0 if passed_count == total_count else 1
+
     print("-" * 60)
-    if checks_passed == checks_total:
-        print(f" Summary: All {checks_total} checks passed! Environment is healthy.\n")
+    if passed_count == total_count:
+        print(f" Summary: All {total_count} checks passed! Environment is healthy.\n")
         return 0
     else:
-        print(f" Summary: {checks_passed}/{checks_total} checks passed. Please run python midev.py setup.\n")
+        print(f" Summary: {passed_count}/{total_count} checks passed. Please run python midev.py setup.\n")
         return 1
 
 
-def show_info(cfg: MidevConfig):
+def show_info(cfg: MidevConfig, as_json: bool = False):
     import projects
     active = projects.get_active_project()
     projs = projects.discover_projects()
+
+    if as_json:
+        import json
+        payload = {
+            "name": cfg.name,
+            "version": cfg.version,
+            "workspaceRoot": str(ROOT_DIR),
+            "configFile": str(ROOT_DIR / "config" / "midev.config.json"),
+            "activeProject": active.to_dict(),
+            "totalProjects": len(projs),
+            "projects": [p.to_dict() for p in projs],
+        }
+        print(json.dumps(payload, indent=2))
+        return
 
     print("\n" + "=" * 60)
     print(f"  midev-tools Studio Overview: {cfg.name} (v{cfg.version})")

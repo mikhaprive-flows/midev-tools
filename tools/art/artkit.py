@@ -137,9 +137,19 @@ class Sheet:
 
 
 # CLI commands
-def cmd_list() -> int:
+def cmd_list(as_json: bool = False) -> int:
     active = projects.get_active_project()
     all_recipes = recipes()
+    if as_json:
+        payload = {
+            "status": "ok",
+            "project": active.to_dict(),
+            "recipes": [p.stem for p in all_recipes],
+            "total": len(all_recipes),
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
     print(f"\nArt Recipes in [{active.title}] ({RECIPES}):")
     print("-------------------------------------------------------")
     if not all_recipes:
@@ -150,19 +160,31 @@ def cmd_list() -> int:
     return 0
 
 
-def cmd_build(names: list[str], clean: bool = False, incremental: bool = False, force: bool = False) -> int:
+def cmd_build(
+    names: list[str],
+    clean: bool = False,
+    incremental: bool = False,
+    force: bool = False,
+    as_json: bool = False,
+) -> int:
     all_recipes = recipes()
     todo = [p for p in all_recipes if not names or p.stem in names]
     if not todo:
-        print(f"[artkit] No matching recipes found in {RECIPES}."); return 1
+        if as_json:
+            print(json.dumps({"status": "error", "message": f"No matching recipes found in {RECIPES}"}, indent=2))
+        else:
+            print(f"[artkit] No matching recipes found in {RECIPES}.")
+        return 1
 
     if clean:
         CACHE.clear()
         if CURRENT_OUT_DIR.exists():
-            print(f"[artkit] Cleaning output dir: {CURRENT_OUT_DIR}")
+            if not as_json:
+                print(f"[artkit] Cleaning output dir: {CURRENT_OUT_DIR}")
             shutil.rmtree(CURRENT_OUT_DIR, ignore_errors=True)
         if CURRENT_PREVIEW_DIR.exists():
-            print(f"[artkit] Cleaning preview dir: {CURRENT_PREVIEW_DIR}")
+            if not as_json:
+                print(f"[artkit] Cleaning preview dir: {CURRENT_PREVIEW_DIR}")
             shutil.rmtree(CURRENT_PREVIEW_DIR, ignore_errors=True)
 
     pal_key = pixelkit.PAL.path.stem if pixelkit.PAL.path else "default"
@@ -171,35 +193,60 @@ def cmd_build(names: list[str], clean: bool = False, incremental: bool = False, 
     if incremental and not force:
         todo = [p for p in todo if CACHE.is_dirty(p, pal_key, exps)]
         if not todo:
-            print(f"[artkit] All {len(all_recipes)} recipes are up-to-date (use --force to rebuild).")
+            if as_json:
+                print(json.dumps({
+                    "status": "ok",
+                    "project": projects.get_active_project().id,
+                    "built": [],
+                    "message": f"All {len(all_recipes)} recipes are up-to-date",
+                }, indent=2))
+            else:
+                print(f"[artkit] All {len(all_recipes)} recipes are up-to-date (use --force to rebuild).")
             return 0
 
     ctx = Ctx(CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR)
     for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
         d.mkdir(parents=True, exist_ok=True)
 
-    print(f"[artkit] Building {len(todo)} recipe(s) -> {CURRENT_OUT_DIR}")
+    if not as_json:
+        print(f"[artkit] Building {len(todo)} recipe(s) -> {CURRENT_OUT_DIR}")
+
+    built_names = []
+    errors = []
     for p in todo:
-        print(f"[art] {p.stem} ...", flush=True)
+        if not as_json:
+            print(f"[art] {p.stem} ...", flush=True)
         try:
             load(p).build(ctx)
             CACHE.record(p, pal_key, exps)
+            built_names.append(p.stem)
         except Exception as e:
-            print(f"[art] ERROR in {p.stem}: {e}")
+            errors.append({"recipe": p.stem, "error": str(e)})
+            if not as_json:
+                print(f"[art] ERROR in {p.stem}: {e}")
 
     CACHE.save()
-    return cmd_validate(ctx.assets)
+
+    if as_json:
+        val_status = cmd_validate(ctx.assets, as_json=True)
+        return 0 if not errors and val_status == 0 else 1
+
+    return cmd_validate(ctx.assets, as_json=False)
 
 
-def cmd_validate(target_dir: Path | None = None) -> int:
+def cmd_validate(target_dir: Path | None = None, as_json: bool = False) -> int:
     from pixelkit import PAL
     out = target_dir or CURRENT_OUT_DIR
     if not out.exists():
-        print(f"[validate] Output dir does not exist: {out}")
+        if as_json:
+            print(json.dumps({"status": "error", "message": f"Output dir does not exist: {out}"}, indent=2))
+        else:
+            print(f"[validate] Output dir does not exist: {out}")
         return 0
 
     bad = 0
     pal = PAL
+    results = []
     for png in sorted(out.rglob("*.png")):
         rel = png.relative_to(out)
         im = Image.open(png)
@@ -224,13 +271,32 @@ def cmd_validate(target_dir: Path | None = None) -> int:
             except Exception:
                 errs.append("invalid json metadata")
 
-        if errs:
+        passed = len(errs) == 0
+        if not passed:
             bad += 1
-            print(f"  FAIL {rel}: {'; '.join(errs)}")
+            if not as_json:
+                print(f"  FAIL {rel}: {'; '.join(errs)}")
         else:
-            print(f"  ok   {rel} {im.size}")
+            if not as_json:
+                print(f"  ok   {rel} {im.size}")
 
-    print("validate:", "PASSED" if not bad else f"{bad} FAILED")
+        results.append({
+            "asset": rel.as_posix(),
+            "passed": passed,
+            "dimensions": list(im.size),
+            "errors": errs,
+        })
+
+    if as_json:
+        payload = {
+            "status": "passed" if bad == 0 else "failed",
+            "violations": bad,
+            "totalAssets": len(results),
+            "assets": results,
+        }
+        print(json.dumps(payload, indent=2))
+    else:
+        print("validate:", "PASSED" if not bad else f"{bad} FAILED")
     return 1 if bad else 0
 
 
@@ -323,9 +389,19 @@ def build(ctx):
     return 0
 
 
-def cmd_project(action: str, name: str | None = None, palette: str = "pico8", out_dir: str | None = None, starter: str = "rpg") -> int:
+def cmd_project(
+    action: str,
+    name: str | None = None,
+    palette: str = "pico8",
+    out_dir: str | None = None,
+    starter: str = "rpg",
+    as_json: bool = False,
+) -> int:
     if action == "list":
         projs = projects.discover_projects()
+        if as_json:
+            print(json.dumps({"status": "ok", "projects": [p.to_dict() for p in projs]}, indent=2))
+            return 0
         print("\nmidev Projects & Workspaces:")
         print("----------------------------------------------------------------------")
         for p in projs:
@@ -338,38 +414,59 @@ def cmd_project(action: str, name: str | None = None, palette: str = "pico8", ou
 
     elif action == "use":
         if not name:
-            print("[project] Error: Missing project name or id.")
+            if as_json:
+                print(json.dumps({"status": "error", "message": "Missing project name or id"}, indent=2))
+            else:
+                print("[project] Error: Missing project name or id.")
             return 1
         try:
             active = projects.set_active_project(name)
-            print(f"[project] Switched active project to: {active.title} ({active.id})")
-            print(f"  Recipes : {active.recipes_dir}")
-            print(f"  Output  : {active.output_dir}")
-            print(f"  Palette : {active.palette}")
+            if as_json:
+                print(json.dumps({"status": "ok", "activeProject": active.to_dict()}, indent=2))
+            else:
+                print(f"[project] Switched active project to: {active.title} ({active.id})")
+                print(f"  Recipes : {active.recipes_dir}")
+                print(f"  Output  : {active.output_dir}")
+                print(f"  Palette : {active.palette}")
             return 0
         except Exception as e:
-            print(f"[project] Error: {e}")
+            if as_json:
+                print(json.dumps({"status": "error", "message": str(e)}, indent=2))
+            else:
+                print(f"[project] Error: {e}")
             return 1
 
     elif action == "create":
         if not name:
-            print("[project] Error: Missing project name.")
+            if as_json:
+                print(json.dumps({"status": "error", "message": "Missing project name"}, indent=2))
+            else:
+                print("[project] Error: Missing project name.")
             return 1
         try:
             p = projects.create_project(name, palette=palette, out_dir=out_dir, starter=starter, set_active=True)
-            print(f"\n[project] Successfully created project '{p.name}'!")
-            print(f"  Location : {p.path}")
-            print(f"  Recipes  : {p.recipes_dir} ({p.recipes_count} starter recipes)")
-            print(f"  Output   : {p.output_dir}")
-            print(f"  Palette  : {p.palette}")
-            print(f"\nSwitched to '{p.name}' as the active project.\n")
+            if as_json:
+                print(json.dumps({"status": "ok", "createdProject": p.to_dict()}, indent=2))
+            else:
+                print(f"\n[project] Successfully created project '{p.name}'!")
+                print(f"  Location : {p.path}")
+                print(f"  Recipes  : {p.recipes_dir} ({p.recipes_count} starter recipes)")
+                print(f"  Output   : {p.output_dir}")
+                print(f"  Palette  : {p.palette}")
+                print(f"\nSwitched to '{p.name}' as the active project.\n")
             return 0
         except Exception as e:
-            print(f"[project] Error creating project: {e}")
+            if as_json:
+                print(json.dumps({"status": "error", "message": str(e)}, indent=2))
+            else:
+                print(f"[project] Error creating project: {e}")
             return 1
 
     elif action == "info":
         active = projects.get_active_project() if not name else projects.set_active_project(name)
+        if as_json:
+            print(json.dumps({"status": "ok", "project": active.to_dict()}, indent=2))
+            return 0
         print(f"\nProject Details: {active.title} ({active.id})")
         print("----------------------------------------------------------------------")
         print(f"  Kind        : {active.kind.title()}")
@@ -383,11 +480,14 @@ def cmd_project(action: str, name: str | None = None, palette: str = "pico8", ou
         return 0
 
     else:
-        print(f"[project] Unknown action '{action}'. Valid actions: list, use, create, info")
+        if as_json:
+            print(json.dumps({"status": "error", "message": f"Unknown action '{action}'"}, indent=2))
+        else:
+            print(f"[project] Unknown action '{action}'. Valid actions: list, use, create, info")
         return 1
 
 
-def cmd_generate(gen_type: str, name: str | None = None, out_dir: Path | None = None) -> int:
+def cmd_generate(gen_type: str, name: str | None = None, out_dir: Path | None = None, as_json: bool = False) -> int:
     target_out = out_dir or CURRENT_OUT_DIR / "sprites"
     target_out.mkdir(parents=True, exist_ok=True)
 
@@ -396,7 +496,11 @@ def cmd_generate(gen_type: str, name: str | None = None, out_dir: Path | None = 
         gen = CharacterGenerator()
         sb = gen.generate_sheet(sheet_name)
         sb.save(target_out)
-        print(f"[generate] Generated Character rig: {target_out / f'{sheet_name}.png'}")
+        out_file = target_out / f"{sheet_name}.png"
+        if as_json:
+            print(json.dumps({"status": "ok", "generator": gen_type, "file": str(out_file)}, indent=2))
+        else:
+            print(f"[generate] Generated Character rig: {out_file}")
         return 0
     elif gen_type == "autotile":
         sheet_name = name or "autotile_terrain"
@@ -405,14 +509,22 @@ def cmd_generate(gen_type: str, name: str | None = None, out_dir: Path | None = 
         tiles_out = out_dir or CURRENT_OUT_DIR / "tiles"
         tiles_out.mkdir(parents=True, exist_ok=True)
         sb.save(tiles_out)
-        print(f"[generate] Generated 47-tile Wang blob autotile: {tiles_out / f'{sheet_name}.png'}")
+        out_file = tiles_out / f"{sheet_name}.png"
+        if as_json:
+            print(json.dumps({"status": "ok", "generator": gen_type, "file": str(out_file)}, indent=2))
+        else:
+            print(f"[generate] Generated 47-tile Wang blob autotile: {out_file}")
         return 0
     elif gen_type == "vfx":
         sheet_name = name or "vfx_burst"
         gen = VFXGenerator()
         sb = gen.generate_sheet(sheet_name)
         sb.save(target_out)
-        print(f"[generate] Generated Pixel VFX sheet: {target_out / f'{sheet_name}.png'}")
+        out_file = target_out / f"{sheet_name}.png"
+        if as_json:
+            print(json.dumps({"status": "ok", "generator": gen_type, "file": str(out_file)}, indent=2))
+        else:
+            print(f"[generate] Generated Pixel VFX sheet: {out_file}")
         return 0
     elif gen_type == "ui":
         sheet_name = name or "hud_kit"
@@ -421,16 +533,26 @@ def cmd_generate(gen_type: str, name: str | None = None, out_dir: Path | None = 
         ui_out = out_dir or CURRENT_OUT_DIR / "ui"
         ui_out.mkdir(parents=True, exist_ok=True)
         sb.save(ui_out)
-        print(f"[generate] Generated 9-slice UI kit sheet: {ui_out / f'{sheet_name}.png'}")
+        out_file = ui_out / f"{sheet_name}.png"
+        if as_json:
+            print(json.dumps({"status": "ok", "generator": gen_type, "file": str(out_file)}, indent=2))
+        else:
+            print(f"[generate] Generated 9-slice UI kit sheet: {out_file}")
         return 0
     else:
-        print(f"[generate] Unknown generator '{gen_type}'. Valid: character, autotile, vfx, ui")
+        if as_json:
+            print(json.dumps({"status": "error", "message": f"Unknown generator '{gen_type}'"}, indent=2))
+        else:
+            print(f"[generate] Unknown generator '{gen_type}'. Valid: character, autotile, vfx, ui")
         return 1
 
 
-def cmd_palette_list() -> int:
+def cmd_palette_list(as_json: bool = False) -> int:
     from palette_kit import list_available_palettes
     palettes = list_available_palettes()
+    if as_json:
+        print(json.dumps({"status": "ok", "palettes": [p.stem for p in palettes]}, indent=2))
+        return 0
     print("\nAvailable Palettes:")
     print("-------------------------------------------------------")
     active_stem = pixelkit.PAL.path.stem if pixelkit.PAL and pixelkit.PAL.path else "default"
@@ -441,20 +563,43 @@ def cmd_palette_list() -> int:
     return 0
 
 
-def cmd_palette_inspect(name: str) -> int:
+def cmd_palette_inspect(name: str, as_json: bool = False) -> int:
     from palette_kit import Palette
     try:
         pal = Palette.from_name_or_file(name)
     except Exception as e:
-        print(f"[artkit] Error inspecting palette '{name}': {e}")
+        if as_json:
+            print(json.dumps({"status": "error", "message": str(e)}, indent=2))
+        else:
+            print(f"[artkit] Error inspecting palette '{name}': {e}")
         return 1
 
-    print(f"\nPalette: {pal.name} ({len(pal.colors)} colors)")
+    pal_title = pal.path.stem if pal.path else name
+    named_map = {k: f"#{rgba[0]:02X}{rgba[1]:02X}{rgba[2]:02X}" for k, rgba in pal.names.items()}
+    color_hexes = [f"#{c[0]:02X}{c[1]:02X}{c[2]:02X}" for c in pal.colors]
+
+    if as_json:
+        payload = {
+            "status": "ok",
+            "palette": pal_title,
+            "totalColors": len(pal.colors),
+            "namedColors": named_map,
+            "colors": color_hexes,
+        }
+        print(json.dumps(payload, indent=2))
+        return 0
+
+    print(f"\nPalette: {pal_title} ({len(pal.colors)} colors)")
     print("-------------------------------------------------------")
-    for key, rgba in sorted(pal.colors.items()):
-        hex_str = f"#{rgba[0]:02X}{rgba[1]:02X}{rgba[2]:02X}"
-        alpha_str = f" (A={rgba[3]})" if rgba[3] < 255 else ""
-        print(f"  {key:<16} : {hex_str}{alpha_str}")
+    if pal.names:
+        for key, rgba in sorted(pal.names.items()):
+            hex_str = f"#{rgba[0]:02X}{rgba[1]:02X}{rgba[2]:02X}"
+            alpha_str = f" (A={rgba[3]})" if rgba[3] < 255 else ""
+            print(f"  {key:<16} : {hex_str}{alpha_str}")
+    else:
+        for idx, rgba in enumerate(pal.colors):
+            hex_str = f"#{rgba[0]:02X}{rgba[1]:02X}{rgba[2]:02X}"
+            print(f"  color_{idx:<10} : {hex_str}")
     print()
     return 0
 
@@ -482,11 +627,17 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--palette", type=str, default=None, help="Active palette name or file")
     common.add_argument("--format", "-f", type=str, default=None, help="Export format(s): godot, texturepacker, slices, native, all")
     common.add_argument("--clean", action="store_true", help="Clean output directory before building")
+    common.add_argument("--json", action="store_true", help="Output machine-readable JSON (ideal for AI agents and automation)")
 
     parser = argparse.ArgumentParser(prog="artkit", parents=[common], description="midev-tools code-generated game art pipeline")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
     subparsers.add_parser("list", parents=[common], help="List all available art recipes in the active project")
+
+    sub_inspect = subparsers.add_parser("inspect", parents=[common], help="Generate multimodal visual verification sheet for AI agents and developers")
+    sub_inspect.add_argument("recipe", type=str, nargs="?", default="player", help="Recipe name to visually inspect")
+    sub_inspect.add_argument("--scale", type=int, default=4, help="Scale factor (default: 4)")
+    sub_inspect.add_argument("--out-file", type=str, default=None, help="Custom output image path")
 
     sub_build = subparsers.add_parser("build", parents=[common], help="Build art recipes")
     sub_build.add_argument("recipes", nargs="*", default=[], help="Specific recipes to build (omit for all)")
@@ -544,36 +695,44 @@ def main(argv: list[str]) -> int:
     cfg = MidevConfig.load(args.config)
     apply_config(cfg, out_override=args.out, preview_override=args.preview, palette_override=args.palette, format_override=args.format)
 
+    as_json = bool(getattr(args, "json", False) or ("--json" in unknown) or ("--json" in argv))
+
     cmd = args.command
     if not cmd and argv:
         first = argv[0]
-        if first in ("build", "validate", "new", "list", "palette", "watch", "doctor", "info", "studio", "preview", "project", "generate"):
+        if first in ("build", "validate", "new", "list", "palette", "watch", "doctor", "info", "studio", "preview", "project", "generate", "inspect"):
             cmd = first
             argv = argv[1:]
         elif not first.startswith("-"):
             cmd = "build"
 
     if cmd == "list":
-        return cmd_list()
+        return cmd_list(as_json=as_json)
+    elif cmd == "inspect":
+        import inspect_tool
+        recipe_target = getattr(args, "recipe", None) or (argv[0] if argv and not argv[0].startswith("-") else "player")
+        scale_val = getattr(args, "scale", 4)
+        out_file_val = getattr(args, "out_file", None)
+        return inspect_tool.cmd_inspect(recipe_target, scale=scale_val, out_file=out_file_val, as_json=as_json)
     elif cmd == "project":
         action = getattr(args, "sub_action", "list")
         pname = getattr(args, "proj_name", None)
         palette = getattr(args, "palette_name", "pico8")
         starter = getattr(args, "starter", "rpg")
         out_dir = getattr(args, "out_dir", None)
-        return cmd_project(action, name=pname, palette=palette, out_dir=out_dir, starter=starter)
+        return cmd_project(action, name=pname, palette=palette, out_dir=out_dir, starter=starter, as_json=as_json)
     elif cmd == "generate":
         gen_type = getattr(args, "gen_type", "character")
         name = getattr(args, "name", None)
-        return cmd_generate(gen_type, name=name)
+        return cmd_generate(gen_type, name=name, as_json=as_json)
     elif cmd in ("studio", "preview"):
         port = getattr(args, "port", 8080)
         no_open = getattr(args, "no_open", False) or ("--no-open" in unknown)
         return cmd_studio(port=port, no_open=no_open)
     elif cmd == "doctor":
-        return run_doctor()
+        return run_doctor(as_json=as_json)
     elif cmd == "info":
-        show_info(CONFIG)
+        show_info(CONFIG, as_json=as_json)
         return 0
     elif cmd == "watch":
         target = getattr(args, "recipe", None) or (argv[0] if argv and not argv[0].startswith("-") else None)
@@ -590,10 +749,13 @@ def main(argv: list[str]) -> int:
                         pal_target = u
         if action == "inspect":
             if not pal_target:
-                print("[artkit] Error: Palette name required. Usage: artkit palette inspect <name>")
+                if as_json:
+                    print(json.dumps({"status": "error", "message": "Palette name required"}, indent=2))
+                else:
+                    print("[artkit] Error: Palette name required. Usage: artkit palette inspect <name>")
                 return 1
-            return cmd_palette_inspect(pal_target)
-        return cmd_palette_list()
+            return cmd_palette_inspect(pal_target, as_json=as_json)
+        return cmd_palette_list(as_json=as_json)
     elif cmd == "new":
         name = getattr(args, "name", None) or (argv[0] if argv else None)
         template = getattr(args, "template", None)
@@ -608,10 +770,10 @@ def main(argv: list[str]) -> int:
         clean_flag = getattr(args, "clean", False) or ("--clean" in unknown) or ("--clean" in argv)
         inc_flag = getattr(args, "incremental", False) or ("--incremental" in unknown) or ("-i" in unknown)
         force_flag = getattr(args, "force", False) or ("--force" in unknown)
-        return cmd_build(target_recipes, clean=clean_flag, incremental=inc_flag, force=force_flag)
+        return cmd_build(target_recipes, clean=clean_flag, incremental=inc_flag, force=force_flag, as_json=as_json)
     elif cmd == "validate":
         target_dir = getattr(args, "target", None)
-        return cmd_validate(Path(target_dir) if target_dir else None)
+        return cmd_validate(Path(target_dir) if target_dir else None, as_json=as_json)
     else:
         parser.print_help()
         return 0

@@ -62,6 +62,20 @@ SEMANTIC_FALLBACKS: dict[str, list[str]] = {
 class Palette:
     """Indexed color palette supporting .hex, .gpl, and .pal formats."""
 
+    @classmethod
+    def from_name_or_file(cls, name_or_file: str | Path) -> "Palette":
+        p = Path(name_or_file)
+        if p.exists() and p.is_file():
+            return cls(p)
+        pal_dir = Path(__file__).parent / "palettes"
+        for ext in (".hex", ".gpl", ".pal"):
+            cand = pal_dir / f"{name_or_file}{ext}"
+            if cand.exists():
+                return cls(cand)
+        for cand in pal_dir.glob(f"{name_or_file}.*"):
+            return cls(cand)
+        raise FileNotFoundError(f"Palette '{name_or_file}' not found in {pal_dir}")
+
     def __init__(self, path: Path | str | None = None):
         self.path: Path | None = Path(path) if path else None
         self.names: dict[str, RGBA] = {}
