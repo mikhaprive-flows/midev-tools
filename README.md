@@ -2,6 +2,7 @@
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![Tests Passing](https://img.shields.io/badge/Tests-Passing-brightgreen?style=flat-square&logo=githubactions&logoColor=white)](tests/)
+[![Status](https://img.shields.io/badge/Status-In%20Active%20Development-yellow?style=flat-square)](#)
 [![MCP Server](https://img.shields.io/badge/MCP-JSON--RPC%202.0-8A2BE2?style=flat-square)](tools/art/mcp_server.py)
 [![Ko-fi Support](https://img.shields.io/badge/Ko--fi-Support%20Developer-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/midevfish)
 [![Trakteer Support](https://img.shields.io/badge/Trakteer-Support%20Developer-be1e2d?style=flat-square)](https://trakteer.id/MiDevFish)
@@ -9,6 +10,9 @@
 
 `midev-tools` is a modular, standalone pixel art and vector asset generation toolkit for 2D game development.
 Built on a **Dual-Audience Architecture**: powerful and lightweight for **human programmers** writing manual code, and natively optimized for **vibe coders & AI coding agents** (Claude, Cursor, Antigravity, Windsurf) through MCP and multimodal visual verification.
+
+> [!NOTE]
+> **Work in Progress**: It's not perfect yet and is still in active development. Features, APIs, and procedural tools are evolving continuously. Feedback, bug reports, and suggestions are warmly welcome!
 
 ---
 
