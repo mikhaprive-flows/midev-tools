@@ -140,14 +140,31 @@
       document.getElementById("inspFrameSize").textContent = `${data.meta?.frameWidth || "-"} x ${data.meta?.frameHeight || "-"}`;
       document.getElementById("inspOrigin").textContent = `${data.meta?.originX ?? "-"}, ${data.meta?.originY ?? "-"}`;
 
-      // Update export download links
+      // Update export download links securely via DOM
       const linksContainer = document.getElementById("exportLinks");
-      linksContainer.innerHTML = `
-        <a href="${data.imageUrl}" target="_blank"><span>PNG SpriteSheet</span><span>↗</span></a>
-        <a href="/assets/${data.id}.tres" target="_blank"><span>Godot 4 .tres</span><span>↗</span></a>
-        <a href="/assets/${data.id}_tp.json" target="_blank"><span>TexturePacker JSON</span><span>↗</span></a>
-        <a href="/assets/${data.id}.json" target="_blank"><span>Native JSON</span><span>↗</span></a>
-      `;
+      linksContainer.textContent = "";
+      const exportItems = [
+        { label: "PNG SpriteSheet", href: data.imageUrl },
+        { label: "Godot 4 .tres", href: `/assets/${encodeURIComponent(data.id)}.tres` },
+        { label: "TexturePacker JSON", href: `/assets/${encodeURIComponent(data.id)}_tp.json` },
+        { label: "Native JSON", href: `/assets/${encodeURIComponent(data.id)}.json` },
+      ];
+      exportItems.forEach((item) => {
+        if (!item.href) return;
+        const a = document.createElement("a");
+        a.href = item.href;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+
+        const spanLabel = document.createElement("span");
+        spanLabel.textContent = item.label;
+        const spanArrow = document.createElement("span");
+        spanArrow.textContent = "↗";
+
+        a.appendChild(spanLabel);
+        a.appendChild(spanArrow);
+        linksContainer.appendChild(a);
+      });
 
       // Populate animation selector
       animSelect.innerHTML = "";
@@ -438,12 +455,21 @@
     renderCanvas();
   };
 
+  function getCsrfHeaders() {
+    const meta = document.querySelector('meta[name="midev-token"]');
+    const token = meta ? meta.getAttribute("content") : "";
+    return token ? { "X-Midev-Token": token } : {};
+  }
+
   rebuildBtn.onclick = async () => {
     const target = state.activeAssetId || state.currentRecipe;
     if (!target) return;
     rebuildBtn.textContent = "⏳ Rebuilding...";
     try {
-      const res = await fetch(`/api/build/${encodeURIComponent(target)}`, { method: "POST" });
+      const res = await fetch(`/api/build/${encodeURIComponent(target)}`, {
+        method: "POST",
+        headers: getCsrfHeaders(),
+      });
       const data = await res.json();
       rebuildBtn.textContent = "✓ Built!";
       setTimeout(() => (rebuildBtn.textContent = "⚡ Rebuild"), 1200);
@@ -457,7 +483,10 @@
   projectSelect.onchange = async (e) => {
     const selected = e.target.value;
     try {
-      await fetch(`/api/project/switch?project=${encodeURIComponent(selected)}`, { method: "POST" });
+      await fetch(`/api/project/switch?project=${encodeURIComponent(selected)}`, {
+        method: "POST",
+        headers: getCsrfHeaders(),
+      });
       state.activeAssetId = null;
       await loadCatalog();
     } catch (err) {

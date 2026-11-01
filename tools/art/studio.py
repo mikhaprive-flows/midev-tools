@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import mimetypes
 import queue
+import secrets
 import threading
 import time
 import webbrowser
@@ -14,7 +15,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from PIL import Image
 
@@ -22,10 +23,27 @@ import artkit
 import projects
 from config import MidevConfig
 from pixelkit import ROOT
+from safepath import is_within
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 EVENT_SUBSCRIBERS: list[queue.Queue] = []
 SUBSCRIBERS_LOCK = threading.Lock()
+SESSION_TOKEN = secrets.token_urlsafe(32)
+MAX_SSE_CLIENTS = 8
+
+
+def safe_resolve(base: Path, rel: str) -> Path | None:
+    """Safely resolve relative path within base directory, blocking traversal and null bytes."""
+    if "\x00" in rel:
+        return None
+    cleaned = unquote(rel).lstrip("/\\")
+    try:
+        candidate = (base / cleaned).resolve()
+    except (ValueError, OSError):
+        return None
+    if is_within(candidate, base) and candidate.is_file():
+        return candidate
+    return None
 
 PRIMARY_ASSET_MAP: dict[str, str] = {
     "player": "sprites/player",
@@ -127,26 +145,64 @@ class StudioHandler(BaseHTTPRequestHandler):
             return
         super().log_message(format, *args)
 
-    def do_HEAD(self):
-        self.do_GET()
+    def _is_valid_host(self) -> bool:
+        host = self.headers.get("Host", "").strip()
+        if not host:
+            return False
+        host_name = host.split(":")[0].lower().strip("[]")
+        return host_name in ("127.0.0.1", "localhost", "::1")
 
-    def do_GET(self):
+    def _is_valid_post(self) -> bool:
+        origin = self.headers.get("Origin")
+        if origin:
+            parsed_origin = urlparse(origin)
+            origin_host = (parsed_origin.hostname or "").lower().strip("[]")
+            if origin_host not in ("127.0.0.1", "localhost", "::1"):
+                return False
+
+        token = self.headers.get("X-Midev-Token")
+        if token and token != SESSION_TOKEN:
+            return False
+
+        return True
+
+    def do_HEAD(self):
+        if not self._is_valid_host():
+            self.send_error(HTTPStatus.FORBIDDEN, "Forbidden: Invalid Host header")
+            return
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/events":
+            self.send_error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed for SSE stream")
+            return
+        self.do_GET(head_only=True)
+
+    def do_GET(self, head_only: bool = False):
+        if not self._is_valid_host():
+            self.send_error(HTTPStatus.FORBIDDEN, "Forbidden: Invalid Host header")
+            return
+
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
 
         # 1. Server-Sent Events stream for hot-reload
         if path == "/api/events":
+            if head_only:
+                self.send_error(HTTPStatus.METHOD_NOT_ALLOWED, "Method not allowed for SSE stream")
+                return
+
+            with SUBSCRIBERS_LOCK:
+                if len(EVENT_SUBSCRIBERS) >= MAX_SSE_CLIENTS:
+                    self.send_error(HTTPStatus.SERVICE_UNAVAILABLE, "Too many active SSE clients")
+                    return
+                client_q = queue.Queue(maxsize=100)
+                EVENT_SUBSCRIBERS.append(client_q)
+
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
             self.send_header("Connection", "keep-alive")
-            self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
-
-            client_q = queue.Queue()
-            with SUBSCRIBERS_LOCK:
-                EVENT_SUBSCRIBERS.append(client_q)
 
             try:
                 self.wfile.write(b"data: {\"type\": \"connected\"}\n\n")
@@ -174,17 +230,17 @@ class StudioHandler(BaseHTTPRequestHandler):
             self.send_json({
                 "projects": [p.to_dict() for p in all_projs],
                 "activeId": active.id,
-            })
+            }, head_only=head_only)
             return
 
         # 3. Asset Catalog Route
         if path == "/api/catalog":
-            self.handle_get_catalog()
+            self.handle_get_catalog(head_only=head_only)
             return
 
         if path == "/api/recipes":
             all_recs = [p.stem for p in artkit.recipes()]
-            self.send_json(all_recs)
+            self.send_json(all_recs, head_only=head_only)
             return
 
         # 4. Individual Asset Details Route
@@ -193,51 +249,62 @@ class StudioHandler(BaseHTTPRequestHandler):
             if not asset_id:
                 self.send_error(HTTPStatus.BAD_REQUEST, "Missing asset id")
                 return
-            self.handle_get_asset(asset_id)
+            self.handle_get_asset(asset_id, head_only=head_only)
             return
 
         # Backward compatibility route for recipes
         if path.startswith("/api/recipe/"):
             recipe_name = path[len("/api/recipe/"):].strip()
             primary_asset = find_primary_asset_for_recipe(recipe_name)
-            self.handle_get_asset(primary_asset)
+            self.handle_get_asset(primary_asset, head_only=head_only)
             return
 
         # 5. Static Web Dashboard Files
         if path in ("/", "/index.html"):
-            self.serve_file(WEB_DIR / "index.html", "text/html; charset=utf-8")
+            self.serve_file(WEB_DIR / "index.html", "text/html; charset=utf-8", head_only=head_only)
             return
         elif path == "/studio.css":
-            self.serve_file(WEB_DIR / "studio.css", "text/css; charset=utf-8")
+            self.serve_file(WEB_DIR / "studio.css", "text/css; charset=utf-8", head_only=head_only)
             return
         elif path == "/studio.js":
-            self.serve_file(WEB_DIR / "studio.js", "application/javascript; charset=utf-8")
+            self.serve_file(WEB_DIR / "studio.js", "application/javascript; charset=utf-8", head_only=head_only)
             return
         elif path == "/favicon.ico":
-            self.serve_file(WEB_DIR / "favicon.ico", "image/x-icon")
+            self.serve_file(WEB_DIR / "favicon.ico", "image/x-icon", head_only=head_only)
             return
 
-        # 6. Exported Assets & Previews Static Serving
+        # 6. Exported Assets & Previews Static Serving with safe resolution
         cfg = artkit.CONFIG
         if path.startswith("/assets/"):
             rel_path = path[len("/assets/"):].lstrip("/")
-            asset_file = cfg.output_dir / rel_path
-            if asset_file.exists() and asset_file.is_file():
+            asset_file = safe_resolve(cfg.output_dir, rel_path)
+            if asset_file:
                 mime, _ = mimetypes.guess_type(str(asset_file))
-                self.serve_file(asset_file, mime or "application/octet-stream")
+                self.serve_file(asset_file, mime or "application/octet-stream", head_only=head_only)
                 return
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
 
         if path.startswith("/previews/"):
             rel_path = path[len("/previews/"):].lstrip("/")
-            prev_file = cfg.previews_dir / rel_path
-            if prev_file.exists() and prev_file.is_file():
+            prev_file = safe_resolve(cfg.previews_dir, rel_path)
+            if prev_file:
                 mime, _ = mimetypes.guess_type(str(prev_file))
-                self.serve_file(prev_file, mime or "application/octet-stream")
+                self.serve_file(prev_file, mime or "application/octet-stream", head_only=head_only)
                 return
+            self.send_error(HTTPStatus.NOT_FOUND, "Not found")
+            return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def do_POST(self):
+        if not self._is_valid_host():
+            self.send_error(HTTPStatus.FORBIDDEN, "Forbidden: Invalid Host header")
+            return
+        if not self._is_valid_post():
+            self.send_error(HTTPStatus.FORBIDDEN, "Forbidden: Invalid Origin or CSRF token")
+            return
+
         parsed = urlparse(self.path)
         path = parsed.path
         query = parse_qs(parsed.query)
@@ -282,7 +349,7 @@ class StudioHandler(BaseHTTPRequestHandler):
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
-    def handle_get_catalog(self):
+    def handle_get_catalog(self, head_only: bool = False):
         # Refresh config in case project changed
         cfg = MidevConfig.load()
         artkit.apply_config(cfg)
@@ -342,32 +409,26 @@ class StudioHandler(BaseHTTPRequestHandler):
             "palette": cfg.palette,
             "activeProject": active_proj.to_dict(),
             "defaultAssetId": default_asset,
-        })
+        }, head_only=head_only)
 
-    def handle_get_asset(self, asset_id: str):
+    def handle_get_asset(self, asset_id: str, head_only: bool = False):
         cfg = artkit.CONFIG
         out_dir = cfg.output_dir
 
         if "/" in asset_id:
             cat, name = asset_id.split("/", 1)
-            png_file = out_dir / cat / f"{name}.png"
-            meta_file = out_dir / cat / f"{name}.json"
-            rel_png = f"{cat}/{name}.png"
         else:
+            cat = "sprites"
             name = asset_id
-            png_file = None
-            meta_file = None
-            rel_png = f"sprites/{name}.png"
-            for cat in ("sprites", "tiles", "ui", "backgrounds"):
-                candidate = out_dir / cat / f"{name}.png"
-                if candidate.exists():
-                    png_file = candidate
-                    meta_file = out_dir / cat / f"{name}.json"
-                    rel_png = f"{cat}/{name}.png"
-                    break
-            if not png_file:
-                png_file = out_dir / "sprites" / f"{name}.png"
-                meta_file = out_dir / "sprites" / f"{name}.json"
+
+        # Validate category and name to prevent traversal
+        if cat not in ("sprites", "tiles", "ui", "backgrounds") or ".." in name or "/" in name or "\\" in name:
+            self.send_error(HTTPStatus.BAD_REQUEST, "Invalid asset identifier")
+            return
+
+        png_file = out_dir / cat / f"{name}.png"
+        meta_file = out_dir / cat / f"{name}.json"
+        rel_png = f"{cat}/{name}.png"
 
         recipe_name = get_recipe_for_asset(name)
 
@@ -406,28 +467,37 @@ class StudioHandler(BaseHTTPRequestHandler):
             "recipe": recipe_name,
             "meta": meta_data,
             "imageUrl": img_url,
-        })
+        }, head_only=head_only)
 
-    def serve_file(self, file_path: Path, content_type: str):
+    def serve_file(self, file_path: Path, content_type: str, head_only: bool = False):
         if not file_path.exists():
             self.send_error(HTTPStatus.NOT_FOUND, "File not found")
             return
-        data = file_path.read_bytes()
+
+        if file_path == (WEB_DIR / "index.html"):
+            html = file_path.read_text(encoding="utf-8")
+            meta_tag = f'<meta name="midev-token" content="{SESSION_TOKEN}">\n</head>'
+            html = html.replace("</head>", meta_tag, 1)
+            data = html.encode("utf-8")
+        else:
+            data = file_path.read_bytes()
+
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        self.wfile.write(data)
+        if not head_only:
+            self.wfile.write(data)
 
-    def send_json(self, obj: Any):
+    def send_json(self, obj: Any, head_only: bool = False):
         data = json.dumps(obj).encode("utf-8")
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
-        self.send_header("Access-Control-Allow-Origin", "*")
         self.end_headers()
-        self.wfile.write(data)
+        if not head_only:
+            self.wfile.write(data)
 
 
 def start_background_watcher():

@@ -31,15 +31,21 @@ class ProjectInfo:
     is_active: bool = False
 
     def to_dict(self) -> dict[str, Any]:
+        def _rel(p: Path) -> str:
+            try:
+                return str(p.resolve().relative_to(ROOT_DIR.resolve()).as_posix())
+            except (ValueError, RuntimeError):
+                return p.name
+
         return {
             "id": self.id,
             "name": self.name,
             "title": self.title,
             "kind": self.kind,
-            "path": str(self.path),
-            "recipes_dir": str(self.recipes_dir),
-            "output_dir": str(self.output_dir),
-            "previews_dir": str(self.previews_dir),
+            "path": _rel(self.path),
+            "recipes_dir": _rel(self.recipes_dir),
+            "output_dir": _rel(self.output_dir),
+            "previews_dir": _rel(self.previews_dir),
             "palette": self.palette,
             "exporters": self.exporters,
             "description": self.description,
