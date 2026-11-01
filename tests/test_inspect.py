@@ -21,6 +21,7 @@ class TestInspectTool(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cfg = MidevConfig.load()
+        cfg.active_project = "samples/fisharium"
         artkit.apply_config(cfg)
 
     def test_generate_inspection_sheet_player(self):

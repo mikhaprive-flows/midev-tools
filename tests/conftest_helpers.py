@@ -76,6 +76,7 @@ def run_cli(
         run_env.update(env)
     run_env["PYTHONIOENCODING"] = "utf-8"
     run_env["PYTHONUTF8"] = "1"
+    run_env["MIDEV_NO_VENV_BOOTSTRAP"] = "1"
 
     proc = subprocess.Popen(
         cmd,

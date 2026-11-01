@@ -16,6 +16,7 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "tests"))
 sys.path.insert(0, str(ROOT / "tools" / "art"))
 
 from conftest_helpers import make_temp_repo, run_cli, REPO_ROOT
@@ -45,7 +46,7 @@ class TestRegressions(unittest.TestCase):
     # -------------------------------------------------------------------------
     def test_build_failure_exit_code(self):
         """Recipe crash must cause midev build to return non-zero exit code."""
-        repo = self._get_temp_repo()
+        repo = self._get_temp_repo(active_project="samples/fisharium")
         rec_dir = repo / "samples" / "fisharium" / "recipes"
         broken_recipe = rec_dir / "broken_test_recipe.py"
         broken_recipe.write_text(
@@ -57,7 +58,7 @@ class TestRegressions(unittest.TestCase):
 
     def test_build_json_reports_errors(self):
         """build --json must contain detailed errors with recipe name and traceback."""
-        repo = self._get_temp_repo()
+        repo = self._get_temp_repo(active_project="samples/fisharium")
         rec_dir = repo / "samples" / "fisharium" / "recipes"
         broken_recipe = rec_dir / "broken_json_recipe.py"
         broken_recipe.write_text(
@@ -66,24 +67,15 @@ class TestRegressions(unittest.TestCase):
         )
         code, stdout, stderr = run_cli(["build", "broken_json_recipe", "--json"], cwd=repo)
         self.assertNotEqual(code, 0)
-        # Find json object in stdout
-        data = None
-        for line in stdout.strip().splitlines():
-            try:
-                parsed = json.loads(line)
-                if isinstance(parsed, dict) and "status" in parsed:
-                    data = parsed
-                    break
-            except Exception:
-                continue
-        self.assertIsNotNone(data, f"No JSON status object found in stdout: {stdout}")
+        data = json.loads(stdout.strip())
         self.assertEqual(data.get("status"), "error")
         errors = data.get("errors", [])
         self.assertGreater(len(errors), 0, f"errors list should not be empty: {data}")
         err0 = errors[0]
-        self.assertIn("recipe", err0)
-        self.assertIn("error", err0)
+        self.assertEqual(err0.get("recipe"), "broken_json_recipe")
+        self.assertIn("Test value error for json", err0.get("error", ""))
         self.assertIn("traceback", err0)
+        self.assertTrue(len(err0["traceback"]) > 0)
 
     # -------------------------------------------------------------------------
     # T1.2: MCP stdout purity

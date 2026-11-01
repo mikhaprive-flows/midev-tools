@@ -9,7 +9,10 @@ import importlib.util
 import json
 import shutil
 import sys
+import traceback
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).parent))
 import pixelkit
@@ -160,106 +163,97 @@ def cmd_list(as_json: bool = False) -> int:
     return 0
 
 
-def cmd_build(
-    names: list[str],
-    clean: bool = False,
-    incremental: bool = False,
-    force: bool = False,
-    as_json: bool = False,
-) -> int:
-    all_recipes = recipes()
-    todo = [p for p in all_recipes if not names or p.stem in names]
-    if not todo:
-        if as_json:
-            print(json.dumps({"status": "error", "message": f"No matching recipes found in {RECIPES}"}, indent=2))
-        else:
-            print(f"[artkit] No matching recipes found in {RECIPES}.")
-        return 1
+@dataclass
+class ValidationResult:
+    status: str
+    violations: int
+    total_assets: int
+    assets: list[dict]
 
-    if clean:
-        CACHE.clear()
-        if CURRENT_OUT_DIR.exists():
-            if not as_json:
-                print(f"[artkit] Cleaning output dir: {CURRENT_OUT_DIR}")
-            shutil.rmtree(CURRENT_OUT_DIR, ignore_errors=True)
-        if CURRENT_PREVIEW_DIR.exists():
-            if not as_json:
-                print(f"[artkit] Cleaning preview dir: {CURRENT_PREVIEW_DIR}")
-            shutil.rmtree(CURRENT_PREVIEW_DIR, ignore_errors=True)
-
-    pal_key = pixelkit.PAL.path.stem if pixelkit.PAL.path else "default"
-    exps = pixelkit.ACTIVE_EXPORTERS
-
-    if incremental and not force:
-        todo = [p for p in todo if CACHE.is_dirty(p, pal_key, exps)]
-        if not todo:
-            if as_json:
-                print(json.dumps({
-                    "status": "ok",
-                    "project": projects.get_active_project().id,
-                    "built": [],
-                    "message": f"All {len(all_recipes)} recipes are up-to-date",
-                }, indent=2))
-            else:
-                print(f"[artkit] All {len(all_recipes)} recipes are up-to-date (use --force to rebuild).")
-            return 0
-
-    ctx = Ctx(CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR)
-    for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
-        d.mkdir(parents=True, exist_ok=True)
-
-    if not as_json:
-        print(f"[artkit] Building {len(todo)} recipe(s) -> {CURRENT_OUT_DIR}")
-
-    built_names = []
-    errors = []
-    for p in todo:
-        if not as_json:
-            print(f"[art] {p.stem} ...", flush=True)
-        try:
-            load(p).build(ctx)
-            CACHE.record(p, pal_key, exps)
-            built_names.append(p.stem)
-        except Exception as e:
-            errors.append({"recipe": p.stem, "error": str(e)})
-            if not as_json:
-                print(f"[art] ERROR in {p.stem}: {e}")
-
-    CACHE.save()
-
-    if as_json:
-        val_status = cmd_validate(ctx.assets, as_json=True)
-        return 0 if not errors and val_status == 0 else 1
-
-    return cmd_validate(ctx.assets, as_json=False)
+    def to_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "violations": self.violations,
+            "totalAssets": self.total_assets,
+            "assets": self.assets,
+        }
 
 
-def cmd_validate(target_dir: Path | None = None, as_json: bool = False) -> int:
+@dataclass
+class BuildResult:
+    status: str
+    project: str
+    built: list[str] = field(default_factory=list)
+    skipped: list[str] = field(default_factory=list)
+    errors: list[dict[str, str]] = field(default_factory=list)
+    validation: dict[str, Any] = field(default_factory=dict)
+
+    def to_dict(self) -> dict:
+        return {
+            "status": self.status,
+            "project": self.project,
+            "built": self.built,
+            "skipped": self.skipped,
+            "errors": self.errors,
+            "validation": self.validation,
+        }
+
+
+def _clean_recipe_output(stem: str, target_dir: Path):
+    """Safely wipe old output files belonging to recipe before building."""
+    if not target_dir.exists():
+        return
+    for f in target_dir.rglob("*"):
+        if f.is_file():
+            if f.stem == stem or f.stem.startswith(f"{stem}_") or f.name.startswith(f"{stem}."):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+
+
+def validate_assets(target_dir: Path | None = None) -> ValidationResult:
+    """Validate output PNG assets against active palette, alpha, and geometry rules."""
     from pixelkit import PAL
     out = target_dir or CURRENT_OUT_DIR
     if not out.exists():
-        if as_json:
-            print(json.dumps({"status": "error", "message": f"Output dir does not exist: {out}"}, indent=2))
-        else:
-            print(f"[validate] Output dir does not exist: {out}")
-        return 0
+        return ValidationResult(
+            status="error",
+            violations=1,
+            total_assets=0,
+            assets=[{"asset": str(out), "passed": False, "dimensions": [0, 0], "errors": [f"Output directory does not exist: {out}"]}],
+        )
 
     bad = 0
     pal = PAL
     results = []
     for png in sorted(out.rglob("*.png")):
         rel = png.relative_to(out)
-        im = Image.open(png)
-        errs = []
+        try:
+            im = Image.open(png)
+        except Exception as e:
+            results.append({
+                "asset": rel.as_posix(),
+                "passed": False,
+                "dimensions": [0, 0],
+                "errors": [f"Failed to open image: {e}"],
+            })
+            bad += 1
+            continue
 
+        errs = []
         if CONFIG.enforce_palette and pal:
             v = pal.violations(im)
             if v:
                 errs.append(f"{v} off-palette px")
 
         if CONFIG.binary_alpha:
-            if any(0 < a < 255 for a in im.getchannel("A").tobytes()):
-                errs.append("semi-transparent px (alpha must be 0/255)")
+            try:
+                alpha = im.getchannel("A")
+                if any(0 < a < 255 for a in alpha.tobytes()):
+                    errs.append("semi-transparent px (alpha must be 0/255)")
+            except Exception:
+                pass
 
         meta = png.with_suffix(".json")
         if meta.exists():
@@ -274,11 +268,6 @@ def cmd_validate(target_dir: Path | None = None, as_json: bool = False) -> int:
         passed = len(errs) == 0
         if not passed:
             bad += 1
-            if not as_json:
-                print(f"  FAIL {rel}: {'; '.join(errs)}")
-        else:
-            if not as_json:
-                print(f"  ok   {rel} {im.size}")
 
         results.append({
             "asset": rel.as_posix(),
@@ -287,17 +276,161 @@ def cmd_validate(target_dir: Path | None = None, as_json: bool = False) -> int:
             "errors": errs,
         })
 
-    if as_json:
-        payload = {
-            "status": "passed" if bad == 0 else "failed",
-            "violations": bad,
-            "totalAssets": len(results),
-            "assets": results,
-        }
-        print(json.dumps(payload, indent=2))
+    status = "passed" if bad == 0 else "failed"
+    return ValidationResult(
+        status=status,
+        violations=bad,
+        total_assets=len(results),
+        assets=results,
+    )
+
+
+def build_recipes(
+    names: list[str] | None = None,
+    clean: bool = False,
+    incremental: bool = False,
+    force: bool = False,
+    out_dir: Path | None = None,
+    preview_dir: Path | None = None,
+) -> BuildResult:
+    """Core recipe build engine returning honest BuildResult without CLI prints."""
+    all_recipes = recipes()
+    all_dict = {p.stem: p for p in all_recipes}
+    todo: list[Path] = []
+    errors: list[dict[str, str]] = []
+    built: list[str] = []
+    skipped: list[str] = []
+
+    if names:
+        for name in names:
+            if name in all_dict:
+                todo.append(all_dict[name])
+            else:
+                errors.append({
+                    "recipe": name,
+                    "error": f"recipe not found: {name}",
+                    "traceback": "",
+                })
     else:
-        print("validate:", "PASSED" if not bad else f"{bad} FAILED")
-    return 1 if bad else 0
+        todo = list(all_recipes)
+
+    active_proj = projects.get_active_project()
+    proj_id = active_proj.id if active_proj else "unknown"
+
+    out = out_dir or CURRENT_OUT_DIR
+    prev = preview_dir or CURRENT_PREVIEW_DIR
+
+    if clean:
+        CACHE.clear()
+        if out.exists():
+            shutil.rmtree(out, ignore_errors=True)
+        if prev.exists():
+            shutil.rmtree(prev, ignore_errors=True)
+
+    pal_key = pixelkit.PAL.path.stem if (pixelkit.PAL and pixelkit.PAL.path) else "default"
+    exps = pixelkit.ACTIVE_EXPORTERS
+
+    if incremental and not force:
+        to_build = []
+        for p in todo:
+            if CACHE.is_dirty(p, pal_key, exps):
+                to_build.append(p)
+            else:
+                skipped.append(p.stem)
+        todo = to_build
+
+    ctx = Ctx(out, prev)
+    for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
+        d.mkdir(parents=True, exist_ok=True)
+
+    for p in todo:
+        _clean_recipe_output(p.stem, ctx.assets)
+        _clean_recipe_output(p.stem, ctx.preview)
+
+        try:
+            mod = load(p)
+            mod.build(ctx)
+            CACHE.record(p, pal_key, exps)
+            built.append(p.stem)
+        except Exception as e:
+            tb = traceback.format_exc()
+            errors.append({
+                "recipe": p.stem,
+                "error": str(e),
+                "traceback": tb,
+            })
+            _clean_recipe_output(p.stem, ctx.assets)
+            _clean_recipe_output(p.stem, ctx.preview)
+
+    CACHE.save()
+
+    val = validate_assets(ctx.assets)
+    is_ok = len(errors) == 0 and val.violations == 0 and val.status == "passed"
+    status = "ok" if is_ok else "error"
+
+    return BuildResult(
+        status=status,
+        project=proj_id,
+        built=built,
+        skipped=skipped,
+        errors=errors,
+        validation=val.to_dict(),
+    )
+
+
+def cmd_build(
+    names: list[str],
+    clean: bool = False,
+    incremental: bool = False,
+    force: bool = False,
+    as_json: bool = False,
+) -> int:
+    result = build_recipes(
+        names=names,
+        clean=clean,
+        incremental=incremental,
+        force=force,
+    )
+    if as_json:
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0 if result.status == "ok" else 1
+
+    print(f"\n[artkit] Project: {result.project}")
+    if result.built:
+        print(f"[artkit] Built {len(result.built)} recipe(s): {', '.join(result.built)}")
+    if result.skipped:
+        print(f"[artkit] Skipped {len(result.skipped)} up-to-date recipe(s)")
+    if result.errors:
+        print(f"[artkit] Encountered {len(result.errors)} error(s):")
+        for err in result.errors:
+            print(f"  ❌ {err['recipe']}: {err['error']}")
+            if err.get("traceback"):
+                for line in err["traceback"].strip().splitlines()[-3:]:
+                    print(f"     {line}")
+
+    val = result.validation
+    print(f"[artkit] Validation: {val.get('status', 'unknown').upper()} ({val.get('violations', 0)} violations across {val.get('totalAssets', 0)} assets)")
+    return 0 if result.status == "ok" else 1
+
+
+def cmd_validate(target_dir: Path | None = None, as_json: bool = False) -> int:
+    val = validate_assets(target_dir)
+    if as_json:
+        print(json.dumps(val.to_dict(), indent=2))
+    else:
+        out = target_dir or CURRENT_OUT_DIR
+        print(f"\n[validate] Validating assets in: {out}")
+        for asset in val.assets:
+            rel = asset.get("asset", "")
+            dims = asset.get("dimensions", [0, 0])
+            errs = asset.get("errors", [])
+            if asset.get("passed"):
+                print(f"  ok   {rel} ({dims[0]}x{dims[1]})")
+            else:
+                print(f"  FAIL {rel}: {'; '.join(errs)}")
+        print("validate:", "PASSED" if val.status == "passed" and val.violations == 0 else f"{val.violations} FAILED")
+
+    return 0 if val.status == "passed" and val.violations == 0 else 1
 
 
 def cmd_new(name: str, template_type: str | None = None) -> int:

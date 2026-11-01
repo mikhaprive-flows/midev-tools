@@ -40,6 +40,13 @@ def get_venv_python() -> Path:
 
 def ensure_venv_execution():
     """If running under system Python, automatically re-spawn inside tools/.venv."""
+    if os.environ.get("MIDEV_NO_VENV_BOOTSTRAP"):
+        return
+
+    # If already running inside a virtual environment, continue
+    if hasattr(sys, "real_prefix") or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix):
+        return
+
     venv_py = get_venv_python()
     cur_py = Path(sys.executable).resolve()
 
