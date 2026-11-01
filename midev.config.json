@@ -1,0 +1,21 @@
+{
+  "name": "midev-art-project",
+  "version": "1.0",
+  "paths": {
+    "recipes": "art_src/recipes",
+    "output": "export/assets",
+    "previews": "export/previews",
+    "palettes": "tools/art/palettes"
+  },
+  "defaults": {
+    "palette": "fisharium32",
+    "enforce_palette": true,
+    "binary_alpha": true
+  },
+  "subdirs": {
+    "sprites": "sprites",
+    "tiles": "tiles",
+    "ui": "ui",
+    "backgrounds": "backgrounds"
+  }
+}

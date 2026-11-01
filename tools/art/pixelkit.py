@@ -83,6 +83,23 @@ class Palette:
 PAL = Palette()
 
 
+def set_active_palette(name_or_path: str | Path) -> Palette:
+    """Switch active palette by name (in palettes/) or direct file path."""
+    global PAL
+    p = Path(name_or_path)
+    if not p.is_absolute():
+        pal_dir = Path(__file__).parent / "palettes"
+        cand = pal_dir / (f"{name_or_path}.hex" if not str(name_or_path).endswith(".hex") else str(name_or_path))
+        if cand.exists():
+            p = cand
+        else:
+            p = ROOT / name_or_path
+    if p.exists():
+        PAL = Palette(p)
+        return PAL
+    raise FileNotFoundError(f"Palette not found: {name_or_path} (resolved to {p})")
+
+
 # ---------------------------------------------------------------- raster canvas
 class Canvas:
     """Integer-pixel drawing surface. Colors may be palette names ('skin'), '#rrggbb' or RGBA."""

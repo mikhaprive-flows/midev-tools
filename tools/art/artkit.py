@@ -1,34 +1,52 @@
 """
-artkit - CLI for the Fisharium art pipeline.
+artkit - CLI for the midev-tools code-generated game art pipeline.
 
-  tools\\art.ps1 build             # run every recipe in art_src/recipes -> game/assets/...
-  tools\\art.ps1 build player      # run one recipe (file name without .py)
-  tools\\art.ps1 validate          # palette / size / alpha checks on game/assets/**.png
-  tools\\art.ps1 new <name>        # scaffold a new recipe from the template
-  tools\\art.ps1 list              # list recipes
+Usage:
+  tools\\art.ps1 list                             # list available recipes
+  tools\\art.ps1 new <name>                       # scaffold a new recipe from _template.py
+  tools\\art.ps1 build [recipe ...]              # build specified (or all) recipes to configured output
+  tools\\art.ps1 build --out <dir> [recipe ...]   # build to custom destination directory
+  tools\\art.ps1 validate [--out <dir>]           # validate palette, alpha, and sheet sizes
+  tools\\art.ps1 build --clean                    # clean output directory before building
 
-Recipes are plain Python files exposing `build(ctx)`; see art_src/recipes/_template.py.
-Previews (scaled GIF/PNG) go to build/art_preview/ - open them with read_file to self-review.
+Recipes are plain Python files in art_src/recipes exposing `build(ctx)`.
+Configuration is read from midev.config.json at the workspace root.
 """
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import json
+import shutil
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 import pixelkit
-from pixelkit import PAL, ROOT  # noqa: E402
-from PIL import Image  # noqa: E402
+from config import MidevConfig
+from pixelkit import PAL, ROOT
+from PIL import Image
 
-RECIPES = ROOT / "art_src" / "recipes"
-ASSETS = ROOT / "game" / "assets"
-PREVIEW = ROOT / "build" / "art_preview"
+# Global active configuration
+CONFIG = MidevConfig.load()
+RECIPES = CONFIG.recipes_dir
+CURRENT_OUT_DIR = CONFIG.output_dir
+CURRENT_PREVIEW_DIR = CONFIG.previews_dir
 
-# Active output targets (default to project game/assets and build/art_preview; overrideable for isolated sandboxes)
-CURRENT_OUT_DIR = ASSETS
-CURRENT_PREVIEW_DIR = PREVIEW
+
+def apply_config(cfg: MidevConfig, out_override: str | None = None, preview_override: str | None = None, palette_override: str | None = None):
+    global CONFIG, RECIPES, CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR
+    CONFIG = cfg
+    RECIPES = cfg.recipes_dir
+    CURRENT_OUT_DIR = Path(out_override).resolve() if out_override else cfg.output_dir
+    CURRENT_PREVIEW_DIR = Path(preview_override).resolve() if preview_override else cfg.previews_dir
+
+    pal_name = palette_override or cfg.palette
+    if pal_name:
+        try:
+            pixelkit.set_active_palette(pal_name)
+        except Exception as e:
+            print(f"[artkit] Warning: Could not set palette '{pal_name}': {e}")
 
 
 class Canvas(pixelkit.Canvas):
@@ -80,7 +98,7 @@ def save_preview_gif(filename: str, frames: list, fps: float = 10, scale: int = 
     big = []
     for f in frames:
         im = f.done() if isinstance(f, (Canvas, pixelkit.Canvas)) else (f.img if hasattr(f, "img") else f)
-        bg = Image.new("RGBA", im.size, PAL["preview_bg"])
+        bg = Image.new("RGBA", im.size, pixelkit.PAL["preview_bg"])
         bg.alpha_composite(im)
         big.append(bg.resize((im.width * scale, im.height * scale), Image.NEAREST).convert("P"))
     if big:
@@ -95,81 +113,201 @@ def save_preview_gif(filename: str, frames: list, fps: float = 10, scale: int = 
 
 
 class Ctx:
-    def __init__(self):
-        self.assets = ASSETS
-        self.sprites = ASSETS / "sprites"
-        self.tiles = ASSETS / "tiles"
-        self.ui = ASSETS / "ui"
-        self.backgrounds = ASSETS / "backgrounds"
-        self.preview = PREVIEW
+    def __init__(self, out_dir: Path | None = None, preview_dir: Path | None = None, subdirs: dict[str, str] | None = None):
+        cfg = CONFIG
+        self.assets = (out_dir or CURRENT_OUT_DIR).resolve()
+        self.output = self.assets
+        self.preview = (preview_dir or CURRENT_PREVIEW_DIR).resolve()
+        s = subdirs if subdirs is not None else cfg.subdirs
+        self.sprites = self.assets / s.get("sprites", "sprites")
+        self.tiles = self.assets / s.get("tiles", "tiles")
+        self.ui = self.assets / s.get("ui", "ui")
+        self.backgrounds = self.assets / s.get("backgrounds", "backgrounds")
 
 
 def load(path: Path):
     spec = importlib.util.spec_from_file_location(path.stem, path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Cannot load module from {path}")
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
 
 
 def recipes():
+    if not RECIPES.exists():
+        return []
     return sorted(p for p in RECIPES.glob("*.py") if not p.name.startswith("_"))
 
 
-def cmd_build(names):
-    todo = [p for p in recipes() if not names or p.stem in names]
+def cmd_build(names: list[str], clean: bool = False) -> int:
+    all_recipes = recipes()
+    todo = [p for p in all_recipes if not names or p.stem in names]
     if not todo:
-        print("no matching recipes"); return 1
-    ctx = Ctx()
+        print("[artkit] No matching recipes found."); return 1
+
+    if clean:
+        if CURRENT_OUT_DIR.exists():
+            print(f"[artkit] Cleaning output dir: {CURRENT_OUT_DIR}")
+            shutil.rmtree(CURRENT_OUT_DIR, ignore_errors=True)
+        if CURRENT_PREVIEW_DIR.exists():
+            print(f"[artkit] Cleaning preview dir: {CURRENT_PREVIEW_DIR}")
+            shutil.rmtree(CURRENT_PREVIEW_DIR, ignore_errors=True)
+
+    ctx = Ctx(CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR)
+    for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
+        d.mkdir(parents=True, exist_ok=True)
+
+    print(f"[artkit] Building {len(todo)} recipe(s) -> {CURRENT_OUT_DIR}")
     for p in todo:
         print(f"[art] {p.stem} ...", flush=True)
         load(p).build(ctx)
-    return cmd_validate()
+
+    return cmd_validate(ctx.assets)
 
 
-def cmd_validate():
+def cmd_validate(target_dir: Path | None = None) -> int:
+    target = (target_dir or CURRENT_OUT_DIR).resolve()
+    if not target.exists():
+        print(f"[artkit] Target directory does not exist: {target}")
+        return 1
+
+    png_files = sorted(target.rglob("*.png"))
+    if not png_files:
+        print(f"[artkit] No PNG assets found in {target}")
+        return 0
+
     bad = 0
-    for png in sorted(ASSETS.rglob("*.png")):
-        im = Image.open(png).convert("RGBA")
-        rel = png.relative_to(ROOT)
+    pal = pixelkit.PAL
+    for png in png_files:
+        try:
+            im = Image.open(png).convert("RGBA")
+        except Exception as e:
+            print(f"  FAIL {png}: corrupt image ({e})")
+            bad += 1
+            continue
+
+        try:
+            rel = png.relative_to(ROOT)
+        except ValueError:
+            rel = png.relative_to(target)
+
         errs = []
-        v = PAL.violations(im)
-        if v and "backgrounds" not in png.parts:
-            errs.append(f"{v} off-palette px")
-        if any(0 < a < 255 for a in im.getchannel("A").tobytes()):
-            errs.append("semi-transparent px (alpha must be 0/255)")
+        if CONFIG.enforce_palette and "backgrounds" not in png.parts:
+            v = pal.violations(im)
+            if v:
+                errs.append(f"{v} off-palette px")
+
+        if CONFIG.binary_alpha:
+            if any(0 < a < 255 for a in im.getchannel("A").tobytes()):
+                errs.append("semi-transparent px (alpha must be 0/255)")
+
         meta = png.with_suffix(".json")
         if meta.exists():
-            m = json.loads(meta.read_text())
-            if im.width % m["frameWidth"] or im.height % m["frameHeight"]:
-                errs.append("sheet size not a multiple of frame size")
+            try:
+                m = json.loads(meta.read_text(encoding="utf-8"))
+                fw, fh = m.get("frameWidth"), m.get("frameHeight")
+                if fw and fh and (im.width % fw or im.height % fh):
+                    errs.append(f"sheet size {im.size} not a multiple of frame size ({fw}x{fh})")
+            except Exception:
+                errs.append("invalid json metadata")
+
         if errs:
             bad += 1
             print(f"  FAIL {rel}: {'; '.join(errs)}")
         else:
             print(f"  ok   {rel} {im.size}")
+
     print("validate:", "PASSED" if not bad else f"{bad} FAILED")
     return 1 if bad else 0
 
 
-def cmd_new(name):
+def cmd_new(name: str) -> int:
+    RECIPES.mkdir(parents=True, exist_ok=True)
     dst = RECIPES / f"{name}.py"
     if dst.exists():
-        print("exists:", dst); return 1
-    dst.write_text((RECIPES / "_template.py").read_text().replace("TEMPLATE", name))
-    print("created", dst); return 0
+        print(f"[artkit] Recipe already exists: {dst}"); return 1
+    template = RECIPES / "_template.py"
+    if template.exists():
+        dst.write_text(template.read_text(encoding="utf-8").replace("TEMPLATE", name), encoding="utf-8")
+    else:
+        dst.write_text(f"# Recipe for {name}\nfrom pixelkit import SheetBuilder, Canvas\n\ndef build(ctx):\n    pass\n", encoding="utf-8")
+    print(f"[artkit] Created {dst}"); return 0
 
 
-def main(argv):
-    if not argv or argv[0] in ("-h", "--help"):
-        print(__doc__); return 0
-    c, rest = argv[0], argv[1:]
-    if c == "build": return cmd_build(rest)
-    if c == "validate": return cmd_validate()
-    if c == "new" and rest: return cmd_new(rest[0])
-    if c == "list":
-        for p in recipes(): print(p.stem)
+def cmd_list() -> int:
+    all_recipes = recipes()
+    if not all_recipes:
+        print("[artkit] No recipes found in", RECIPES)
         return 0
-    print(__doc__); return 1
+    for p in all_recipes:
+        print(p.stem)
+    return 0
+
+
+def build_parser() -> argparse.ArgumentParser:
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--config", "-c", type=str, default=None, help="Path to midev.config.json")
+    common.add_argument("--out", "-o", type=str, default=None, help="Output directory for generated assets")
+    common.add_argument("--preview", "-p", type=str, default=None, help="Output directory for preview GIFs/PNGs")
+    common.add_argument("--palette", type=str, default=None, help="Active palette name or file")
+    common.add_argument("--clean", action="store_true", help="Clean output directory before building")
+
+    parser = argparse.ArgumentParser(prog="artkit", parents=[common], description="midev-tools code-generated game art pipeline")
+    subparsers = parser.add_subparsers(dest="command", help="Command to run")
+
+    sub_list = subparsers.add_parser("list", parents=[common], help="List all available art recipes")
+
+    sub_build = subparsers.add_parser("build", parents=[common], help="Build art recipes")
+    sub_build.add_argument("recipes", nargs="*", default=[], help="Specific recipes to build (omit for all)")
+
+    sub_validate = subparsers.add_parser("validate", parents=[common], help="Validate compiled assets")
+    sub_validate.add_argument("--target", "-t", type=str, default=None, help="Directory to validate")
+
+    sub_new = subparsers.add_parser("new", parents=[common], help="Scaffold a new recipe")
+    sub_new.add_argument("name", type=str, help="Recipe name")
+
+    return parser
+
+
+def main(argv: list[str]) -> int:
+    parser = build_parser()
+    args, unknown = parser.parse_known_args(argv)
+
+    # Load configuration
+    cfg = MidevConfig.load(args.config)
+    apply_config(cfg, out_override=args.out, preview_override=args.preview, palette_override=args.palette)
+
+    cmd = args.command
+    # Fallback to positional parsing for backwards compatibility with "art.ps1 build chest"
+    if not cmd and argv:
+        first = argv[0]
+        if first in ("build", "validate", "new", "list"):
+            cmd = first
+            argv = argv[1:]
+        elif not first.startswith("-"):
+            cmd = "build"
+
+    if cmd == "list":
+        return cmd_list()
+    elif cmd == "new":
+        name = getattr(args, "name", None) or (argv[0] if argv else None)
+        if not name:
+            print("[artkit] Error: Recipe name is required. Usage: artkit new <name>")
+            return 1
+        return cmd_new(name)
+    elif cmd == "build":
+        target_recipes = getattr(args, "recipes", [])
+        if not target_recipes:
+            target_recipes = [a for a in unknown if not a.startswith("-")]
+        clean_flag = getattr(args, "clean", False) or ("--clean" in unknown) or ("--clean" in argv)
+        return cmd_build(target_recipes, clean=clean_flag)
+    elif cmd == "validate":
+        target_dir = getattr(args, "target", None)
+        return cmd_validate(Path(target_dir) if target_dir else None)
+    else:
+        parser.print_help()
+        return 0
 
 
 if __name__ == "__main__":

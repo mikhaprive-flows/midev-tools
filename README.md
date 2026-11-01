@@ -58,6 +58,7 @@ midev_art_tools/
 │   ├── setup.ps1         # Environment initialization script
 │   ├── github.ps1        # Git & GitHub management tool
 │   └── requirements.txt  # Python package requirements
-├── ART_PIPELINE.md       # Pipeline architecture & style specifications
+├── docs/
+│   └── ART_PIPELINE.md   # Pipeline architecture & style specifications
 └── README.md             # Project documentation
 ```
