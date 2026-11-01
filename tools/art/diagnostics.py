@@ -33,7 +33,10 @@ def run_doctor(as_json: bool = False) -> int:
     check("Python Runtime", py_ok, f"{py_ver} ({sys.executable})")
 
     # 2. Virtual environment
-    venv_py = ROOT_DIR / "tools" / ".venv" / "Scripts" / "python.exe"
+    if sys.platform == "win32":
+        venv_py = ROOT_DIR / "tools" / ".venv" / "Scripts" / "python.exe"
+    else:
+        venv_py = ROOT_DIR / "tools" / ".venv" / "bin" / "python"
     check("Virtual Environment", venv_py.exists(), f"{venv_py}")
 
     # 3. Pillow library

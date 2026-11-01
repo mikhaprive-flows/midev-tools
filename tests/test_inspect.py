@@ -4,6 +4,7 @@ Tests for Multimodal Visual Inspection Engine (inspect_tool).
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from PIL import Image
@@ -23,22 +24,24 @@ class TestInspectTool(unittest.TestCase):
         artkit.apply_config(cfg)
 
     def test_generate_inspection_sheet_player(self):
-        result = inspect_tool.generate_inspection_sheet("player", scale=2, quiet=True)
-        self.assertEqual(result.get("status"), "ok")
-        self.assertEqual(result.get("recipe"), "player")
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            out_file = Path(tmp_dir) / "player_inspect.png"
+            result = inspect_tool.generate_inspection_sheet("player", scale=2, out_path=out_file, quiet=True)
+            self.assertEqual(result.get("status"), "ok")
+            self.assertEqual(result.get("recipe"), "player")
 
-        sheet_path = Path(result["inspectionSheet"])
-        self.assertTrue(sheet_path.exists())
-        self.assertGreater(sheet_path.stat().st_size, 0)
+            sheet_path = Path(result["inspectionSheet"])
+            self.assertTrue(sheet_path.exists())
+            self.assertGreater(sheet_path.stat().st_size, 0)
 
-        with Image.open(sheet_path) as im:
-            self.assertEqual(im.format, "PNG")
-            self.assertGreater(im.width, 200)
-            self.assertGreater(im.height, 200)
+            with Image.open(sheet_path) as im:
+                self.assertEqual(im.format, "PNG")
+                self.assertGreater(im.width, 200)
+                self.assertGreater(im.height, 200)
 
-        self.assertEqual(result.get("offPaletteBleeds"), 0)
-        self.assertEqual(result.get("alphaViolations"), 0)
-        self.assertGreater(result.get("totalColors", 0), 10)
+            self.assertEqual(result.get("offPaletteBleeds"), 0)
+            self.assertEqual(result.get("alphaViolations"), 0)
+            self.assertGreater(result.get("totalColors", 0), 10)
 
 
 if __name__ == "__main__":
