@@ -359,7 +359,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                 })
         else:
             for p in sorted(png_list):
-                if p.name.startswith("."):
+                if p.name.startswith(".") or "_slices" in p.parts:
                     continue
                 rel = p.relative_to(out_dir)
                 cat = rel.parts[0] if len(rel.parts) > 1 else "sprites"

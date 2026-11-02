@@ -14,10 +14,12 @@ class SlicesExporter(BaseExporter):
     extension = ".png"
 
     def export(self, info: SheetInfo, out_dir: Path) -> list[Path]:
-        slices_dir = out_dir / info.name
+        slices_dir = out_dir / info.name / "_slices"
         slices_dir.mkdir(parents=True, exist_ok=True)
+        marker = slices_dir / ".slices_marker"
+        marker.write_text("midev slices marker\n", encoding="utf-8")
 
-        created: list[Path] = []
+        created: list[Path] = [marker]
         for anim in info.anims:
             for idx, frame in enumerate(anim.frames):
                 filename = f"{anim.name}_{idx:03d}.png"

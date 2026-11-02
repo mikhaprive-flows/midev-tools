@@ -57,10 +57,7 @@ def run_exporters(info: SheetInfo, out_dir: Path, formats: Sequence[str] | None 
         if exp is None:
             log(f"[exporter] Warning: Unknown exporter format '{fmt}' (available: {', '.join(list_available_exporters())})")
             continue
-        try:
-            res = exp.export(info, out_dir)
-            created_files.extend(res)
-        except Exception as e:
-            log(f"[exporter] Error in exporter '{fmt}' for {info.name}: {e}")
+        res = exp.export(info, out_dir)
+        created_files.extend(res)
 
     return created_files

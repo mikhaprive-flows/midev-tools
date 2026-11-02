@@ -46,6 +46,7 @@ class MidevConfig:
     palette: str = "fisharium32"
     enforce_palette: bool = True
     binary_alpha: bool = True
+    godot_res_prefix: str = ""
     exporters: list[str] = field(default_factory=lambda: ["native", "godot", "texturepacker", "slices"])
     subdirs: dict[str, str] = field(
         default_factory=lambda: {
@@ -147,6 +148,8 @@ class MidevConfig:
                             cfg.previews_dir = cls._resolve_path(p_data["previews_dir"])
                         if "exporters" in p_data:
                             cfg.exporters = p_data["exporters"]
+                        if "godot_res_prefix" in p_data:
+                            cfg.godot_res_prefix = str(p_data["godot_res_prefix"]).strip("/")
                     except Exception as pe:
                         print(f"[config] Warning: Failed to parse project config {p_json}: {pe}")
 

@@ -289,6 +289,8 @@ class SheetBuilder:
         self.binarized_alpha: int = 0
 
     def add(self, anim: str, frames: Iterable[Image.Image | Canvas], fps: float = 8, loop: bool = True):
+        if fps <= 0:
+            raise ValueError(f"FPS must be positive, got {fps} for animation '{anim}' in '{self.name}'")
         fr: list[Image.Image] = []
         for f in frames:
             if isinstance(f, Canvas):
@@ -302,12 +304,17 @@ class SheetBuilder:
                     fr.append(img)
                 else:
                     fr.append(f)
+        if not fr:
+            raise ValueError(f"Animation '{anim}' in '{self.name}' must contain at least one frame")
         for f in fr:
-            assert f.size == (self.fw, self.fh), f"{self.name}/{anim}: frame {f.size} != {(self.fw, self.fh)}"
+            if f.size != (self.fw, self.fh):
+                raise ValueError(f"{self.name}/{anim}: frame {f.size} != {(self.fw, self.fh)}")
         self.anims.append((anim, fr, fps, loop))
         return self
 
     def save(self, out_dir: Path, formats: Sequence[str] | None = None) -> Path:
+        if not self.anims:
+            raise ValueError(f"Cannot save SheetBuilder '{self.name}': no animations added")
         out_dir = Path(out_dir).resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
         cols = max(len(a[1]) for a in self.anims)
@@ -319,34 +326,24 @@ class SheetBuilder:
         sheet.save(png)
 
         created_files = [png]
-        try:
-            from exporters import SheetInfo, AnimationData, run_exporters
-            anim_data = [
-                AnimationData(name=anim, frames=frames, fps=fps, loop=loop, row=row)
-                for row, (anim, frames, fps, loop) in enumerate(self.anims)
-            ]
-            info = SheetInfo(
-                name=self.name,
-                fw=self.fw,
-                fh=self.fh,
-                origin=self.origin,
-                anims=anim_data,
-                sheet_width=sheet.width,
-                sheet_height=sheet.height,
-                image_path=png,
-            )
-            target_formats = formats or ACTIVE_EXPORTERS
-            exp_files = run_exporters(info, out_dir, target_formats)
-            created_files.extend(exp_files)
-        except Exception as e:
-            # Fallback to basic JSON if exporter subsystem fails
-            meta = {"name": self.name, "frameWidth": self.fw, "frameHeight": self.fh,
-                    "originX": self.origin[0], "originY": self.origin[1], "animations": {}}
-            for row, (anim, frames, fps, loop) in enumerate(self.anims):
-                meta["animations"][anim] = {"row": row, "frames": len(frames), "fps": fps, "loop": loop}
-            fallback_json = out_dir / f"{self.name}.json"
-            fallback_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-            created_files.append(fallback_json)
+        from exporters import SheetInfo, AnimationData, run_exporters
+        anim_data = [
+            AnimationData(name=anim, frames=frames, fps=fps, loop=loop, row=row)
+            for row, (anim, frames, fps, loop) in enumerate(self.anims)
+        ]
+        info = SheetInfo(
+            name=self.name,
+            fw=self.fw,
+            fh=self.fh,
+            origin=self.origin,
+            anims=anim_data,
+            sheet_width=sheet.width,
+            sheet_height=sheet.height,
+            image_path=png,
+        )
+        target_formats = formats or ACTIVE_EXPORTERS
+        exp_files = run_exporters(info, out_dir, target_formats)
+        created_files.extend(exp_files)
 
         # Record asset to build manifest
         try:
@@ -397,8 +394,13 @@ class SheetBuilder:
         return png
 
     def preview_gif(self, out_dir: Path, scale: int = 4):
+        if not self.anims:
+            raise ValueError(f"Cannot generate preview_gif for '{self.name}': no animations added")
+        out_dir = Path(out_dir).resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
         for anim, frames, fps, _ in self.anims:
+            if not frames:
+                continue
             big = []
             for f in frames:
                 bg = Image.new("RGBA", f.size, PAL["preview_bg"])
