@@ -161,6 +161,12 @@ def recipes() -> list[Path]:
 Canvas = pixelkit.Canvas
 
 
+def __getattr__(name: str):
+    if name == "PAL":
+        return pixelkit.PAL
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+
 # CLI commands
 def cmd_list(as_json: bool = False) -> int:
     active = projects.get_active_project()
