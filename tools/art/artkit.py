@@ -1045,6 +1045,7 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--clean", action="store_true", help="Clean output directory before building")
     common.add_argument("--allow-external-output", action="store_true", help="Allow building into directory outside workspace")
     common.add_argument("--allow-nonempty-output", action="store_true", help="Allow building into existing non-empty directory")
+    common.add_argument("--debug", action="store_true", help="Show full traceback on errors")
     common.add_argument("--json", action="store_true", help="Output machine-readable JSON (ideal for AI agents and automation)")
 
     parser = argparse.ArgumentParser(prog="artkit", parents=[common], description="midev-tools code-generated game art pipeline")
@@ -1101,30 +1102,55 @@ def main(argv: list[str]) -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args(argv)
 
+    as_json = bool(getattr(args, "json", False) or ("--json" in unknown) or ("--json" in argv))
+    is_debug = bool(getattr(args, "debug", False) or ("--debug" in unknown) or ("--debug" in argv))
+
     # If --project was specified, set in-memory project override (does not mutate config on disk)
     proj_override = getattr(args, "project", None)
     if proj_override:
         try:
             projects.set_project_override(proj_override)
         except Exception as e:
-            print(f"[artkit] Error selecting project: {e}")
+            if as_json:
+                print(json.dumps({"status": "error", "errors": [{"recipe": "project", "error": str(e)}]}, indent=2))
+            else:
+                print(f"[artkit] ERROR: Error selecting project: {e}", file=sys.stderr)
             return 1
 
     # Load configuration aligned with active project
-    cfg = MidevConfig.load(args.config, project_override=proj_override)
-    allow_ext = bool(getattr(args, "allow_external_output", False) or ("--allow-external-output" in unknown) or ("--allow-external-output" in argv))
-    allow_nonempty = bool(getattr(args, "allow_nonempty_output", False) or ("--allow-nonempty-output" in unknown) or ("--allow-nonempty-output" in argv))
-    apply_config(
-        cfg,
-        out_override=args.out,
-        preview_override=args.preview,
-        palette_override=args.palette,
-        format_override=args.format,
-        allow_external_output=allow_ext,
-        allow_nonempty_output=allow_nonempty,
-    )
-
-    as_json = bool(getattr(args, "json", False) or ("--json" in unknown) or ("--json" in argv))
+    try:
+        cfg = MidevConfig.load(args.config, project_override=proj_override)
+        allow_ext = bool(getattr(args, "allow_external_output", False) or ("--allow-external-output" in unknown) or ("--allow-external-output" in argv))
+        allow_nonempty = bool(getattr(args, "allow_nonempty_output", False) or ("--allow-nonempty-output" in unknown) or ("--allow-nonempty-output" in argv))
+        apply_config(
+            cfg,
+            out_override=args.out,
+            preview_override=args.preview,
+            palette_override=args.palette,
+            format_override=args.format,
+            allow_external_output=allow_ext,
+            allow_nonempty_output=allow_nonempty,
+        )
+    except ValueError as e:
+        if as_json:
+            print(json.dumps({
+                "status": "error",
+                "errors": [{"recipe": "config", "error": str(e)}],
+            }, indent=2))
+        else:
+            print(f"[artkit] ERROR: {e}", file=sys.stderr)
+        return 1
+    except Exception as e:
+        if is_debug:
+            raise
+        if as_json:
+            print(json.dumps({
+                "status": "error",
+                "errors": [{"recipe": "config", "error": str(e)}],
+            }, indent=2))
+        else:
+            print(f"[artkit] ERROR: {e} (run with --debug for full traceback)", file=sys.stderr)
+        return 1
 
     cmd = args.command
     if not cmd and argv:

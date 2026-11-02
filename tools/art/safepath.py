@@ -63,7 +63,7 @@ def assert_safe_output_dir(p: Path, allow_external: bool = False):
         raise ValueError(f"Unsafe output directory: {rp}")
 
     if not allow_external and not is_within(rp, ROOT_DIR):
-        raise ValueError(f"Output directory outside workspace requires explicit approval: {rp}")
+        raise ValueError(f"Output directory outside workspace requires explicit approval: {rp}. Pass --allow-external-output if intentional.")
 
 
 def validate_clean_target(d: Path, allow_external: bool = False):
