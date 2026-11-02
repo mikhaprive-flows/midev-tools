@@ -362,7 +362,11 @@ class MCPServer:
             self.send_tool_result(req_id, res_data)
 
         elif name == "midev_build_recipe":
-            rec_list = args.get("recipes", [])
+            rec_single = args.get("recipe") or args.get("name")
+            if rec_single:
+                rec_list = [rec_single] if isinstance(rec_single, str) else list(rec_single)
+            else:
+                rec_list = args.get("recipes", [])
             if not isinstance(rec_list, list) or any(not isinstance(r, str) for r in rec_list):
                 self.send_tool_error(req_id, f"Invalid argument 'recipes': expected array of strings, got {rec_list!r}")
                 return

@@ -531,6 +531,66 @@ class TestRegressions(unittest.TestCase):
         col = pal["brown"]
         self.assertEqual(col, pal.names["dark_tan"])
 
+    def test_subprocess_recipe_timeout(self):
+        """Subprocess runner must terminate hanging recipes with TimeoutError within deadline."""
+        import tempfile
+        from artkit import _run_recipe_subprocess
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            rec = tmp / "hang_recipe.py"
+            rec.write_text(
+                "import time\n"
+                "def build(ctx):\n"
+                "    time.sleep(5.0)\n",
+                encoding="utf-8",
+            )
+            res = _run_recipe_subprocess(
+                recipe_path=rec,
+                out_dir=tmp / "assets",
+                prev_dir=tmp / "preview",
+                palette_key="fisharium32",
+                exporters=["native"],
+                project_id="samples/fisharium",
+                timeout=0.8,
+            )
+            self.assertEqual(res.get("status"), "error")
+            self.assertIn("TimeoutError", res.get("error", ""))
+
+    def test_subprocess_recipe_sys_exit_isolated(self):
+        """Recipe calling sys.exit must be trapped cleanly by worker without killing parent."""
+        import tempfile
+        from artkit import _run_recipe_subprocess
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            tmp = Path(tmp_dir)
+            rec = tmp / "exit_recipe.py"
+            rec.write_text(
+                "import sys\n"
+                "def build(ctx):\n"
+                "    sys.exit(7)\n",
+                encoding="utf-8",
+            )
+            res = _run_recipe_subprocess(
+                recipe_path=rec,
+                out_dir=tmp / "assets",
+                prev_dir=tmp / "preview",
+                palette_key="fisharium32",
+                exporters=["native"],
+                project_id="samples/fisharium",
+                timeout=10.0,
+            )
+            self.assertEqual(res.get("status"), "error")
+            self.assertIn("SystemExit(7)", res.get("error", ""))
+
+    def test_subprocess_parallel_build(self):
+        """Parallel recipe build must succeed across multiple workers."""
+        from artkit import build_recipes
+        res = build_recipes(["chest", "chests"], parallel=True)
+        self.assertEqual(res.status, "ok")
+        self.assertIn("chest", res.built)
+        self.assertIn("chests", res.built)
+
 
 if __name__ == "__main__":
     unittest.main()

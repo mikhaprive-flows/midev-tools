@@ -11,9 +11,11 @@ import hashlib
 import importlib.util
 import json
 import shutil
+import subprocess
 import sys
 import threading
 import traceback
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -433,6 +435,78 @@ def validate_assets(target_dir: Path | None = None) -> ValidationResult:
     )
 
 
+def _run_recipe_subprocess(
+    recipe_path: Path,
+    out_dir: Path,
+    prev_dir: Path,
+    palette_key: str,
+    exporters: list[str],
+    project_id: str,
+    timeout: float = 30.0,
+    seed: int = 42,
+) -> dict[str, Any]:
+    """Execute a single art recipe inside an isolated Python worker subprocess."""
+    worker_script = Path(__file__).parent / "worker.py"
+    cmd = [
+        sys.executable,
+        str(worker_script),
+        "--recipe", str(recipe_path),
+        "--output-dir", str(out_dir),
+        "--preview-dir", str(prev_dir),
+        "--palette", str(palette_key),
+        "--exporters", ",".join(exporters),
+        "--project", str(project_id),
+        "--seed", str(seed),
+    ]
+    try:
+        proc = subprocess.run(
+            cmd,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+        )
+        if proc.stderr:
+            sys.stderr.write(proc.stderr)
+            sys.stderr.flush()
+
+        stdout_text = proc.stdout.strip()
+        last_line = stdout_text.splitlines()[-1] if stdout_text else ""
+        if last_line:
+            try:
+                data = json.loads(last_line)
+                if isinstance(data, dict):
+                    return data
+            except Exception:
+                pass
+
+        if proc.returncode == 0:
+            return {"status": "ok", "recipe": recipe_path.stem}
+        else:
+            err_msg = proc.stderr.strip() or f"Worker process exited with code {proc.returncode}"
+            return {
+                "status": "error",
+                "recipe": recipe_path.stem,
+                "error": err_msg.splitlines()[-1] if err_msg else f"Exit code {proc.returncode}",
+                "traceback": proc.stderr.strip(),
+            }
+    except subprocess.TimeoutExpired:
+        return {
+            "status": "error",
+            "recipe": recipe_path.stem,
+            "error": f"TimeoutError: Recipe execution timed out after {timeout}s",
+            "traceback": "",
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "recipe": recipe_path.stem,
+            "error": f"{type(e).__name__}: {e}",
+            "traceback": traceback.format_exc(),
+        }
+
+
 def build_recipes(
     names: list[str] | None = None,
     clean: bool = False,
@@ -441,6 +515,8 @@ def build_recipes(
     out_dir: Path | None = None,
     preview_dir: Path | None = None,
     context: BuildContext | None = None,
+    timeout: float = 30.0,
+    parallel: bool = False,
 ) -> BuildResult:
     """Core recipe build engine returning honest BuildResult without CLI prints."""
     with BUILD_LOCK:
@@ -563,7 +639,7 @@ def build_recipes(
                 errors.append({"recipe": p.stem, "error": str(e), "traceback": ""})
         todo = valid_todo
 
-        for p in todo:
+        def build_one_recipe(p: Path) -> tuple[Path, dict[str, Any]]:
             manifest.load()
             old_files = manifest.remove_recipe(p.stem)
             for rel_f in old_files:
@@ -578,18 +654,35 @@ def build_recipes(
             _clean_recipe_output(p.stem, ctx.assets, manifest=manifest)
             _clean_recipe_output(p.stem, ctx.preview, manifest=manifest)
 
-            pixelkit.reset_build_stats()
-            pixelkit.set_current_recipe(p.stem, output_dir=out)
-            try:
-                mod = load(p)
-                if not hasattr(mod, "build") or not callable(getattr(mod, "build")):
-                    warnings.append({
-                        "recipe": p.stem,
-                        "warning": f"skipped (no build()): {p.stem}",
-                    })
-                    continue
-                with contextlib.redirect_stdout(sys.stderr):
-                    mod.build(ctx)
+            res = _run_recipe_subprocess(
+                recipe_path=p,
+                out_dir=ctx.assets,
+                prev_dir=ctx.preview,
+                palette_key=pal_key,
+                exporters=exps,
+                project_id=proj_id,
+                timeout=timeout,
+            )
+            return p, res
+
+        # Process recipes sequentially or in parallel
+        if parallel and len(todo) > 1:
+            max_workers = min(4, len(todo))
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(build_one_recipe, p) for p in todo]
+                results = [f.result() for f in futures]
+        else:
+            results = [build_one_recipe(p) for p in todo]
+
+        for p, res in results:
+            if res.get("status") == "skipped":
+                warnings.append({
+                    "recipe": p.stem,
+                    "warning": res.get("warning", f"skipped (no build()): {p.stem}"),
+                })
+                continue
+
+            if res.get("status") == "ok":
                 recipe_outputs = _find_recipe_outputs(p.stem, ctx.assets, ctx.preview)
 
                 # Ensure any non-SheetBuilder PNGs created in ctx.assets are tracked in manifest
@@ -625,19 +718,17 @@ def build_recipes(
                 cache.record(p, palette=pal_key, exporters=exps, palette_path=pal_path, output_files=recipe_outputs)
                 built.append(p.stem)
 
-                stats = pixelkit.get_build_stats()
-                if stats["snapped_pixels"] > 0:
+                snapped = res.get("snapped_pixels", 0)
+                if snapped > 0:
                     warnings.append({
                         "recipe": p.stem,
-                        "warning": f"Snapped {stats['snapped_pixels']} pixel(s) to nearest palette colors",
-                        "snapped_pixels": stats["snapped_pixels"],
-                        "binarized_alpha": stats["binarized_alpha"],
+                        "warning": f"Snapped {snapped} pixel(s) to nearest palette colors",
+                        "snapped_pixels": snapped,
+                        "binarized_alpha": res.get("binarized_alpha", 0),
                     })
-            except KeyboardInterrupt:
-                raise
-            except BaseException as e:
-                tb = traceback.format_exc()
-                err_str = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+            else:
+                err_str = res.get("error", "Unknown build error")
+                tb = res.get("traceback", "")
                 errors.append({
                     "recipe": p.stem,
                     "error": err_str,
@@ -655,8 +746,6 @@ def build_recipes(
                 manifest.save()
                 _clean_recipe_output(p.stem, ctx.assets)
                 _clean_recipe_output(p.stem, ctx.preview)
-            finally:
-                pixelkit.set_current_recipe(None, None)
 
         cache.save()
 
@@ -681,12 +770,16 @@ def cmd_build(
     incremental: bool = False,
     force: bool = False,
     as_json: bool = False,
+    timeout: float = 30.0,
+    parallel: bool = False,
 ) -> int:
     result = build_recipes(
         names=names,
         clean=clean,
         incremental=incremental,
         force=force,
+        timeout=timeout,
+        parallel=parallel,
     )
     if as_json:
         print(json.dumps(result.to_dict(), indent=2))
@@ -1135,6 +1228,8 @@ def build_parser() -> argparse.ArgumentParser:
     sub_build.add_argument("recipes", nargs="*", default=[], help="Specific recipes to build (omit for all)")
     sub_build.add_argument("--incremental", "-i", action="store_true", default=argparse.SUPPRESS, help="Build only modified recipes")
     sub_build.add_argument("--force", action="store_true", default=argparse.SUPPRESS, help="Force rebuild all recipes bypassing cache")
+    sub_build.add_argument("--timeout", type=float, default=argparse.SUPPRESS, help="Subprocess timeout per recipe in seconds (default: 30.0)")
+    sub_build.add_argument("--parallel", "-j", action="store_true", default=argparse.SUPPRESS, help="Build recipes in parallel worker subprocesses")
 
     sub_validate = subparsers.add_parser("validate", parents=[common_sub], help="Validate compiled assets")
     sub_validate.add_argument("--target", "-t", type=str, default=None, help="Directory to validate")
@@ -1292,7 +1387,17 @@ def main(argv: list[str]) -> int:
         clean_flag = bool(getattr(args, "clean", False))
         inc_flag = bool(getattr(args, "incremental", False))
         force_flag = bool(getattr(args, "force", False))
-        return cmd_build(target_recipes, clean=clean_flag, incremental=inc_flag, force=force_flag, as_json=as_json)
+        timeout_val = float(getattr(args, "timeout", 30.0))
+        parallel_flag = bool(getattr(args, "parallel", False))
+        return cmd_build(
+            target_recipes,
+            clean=clean_flag,
+            incremental=inc_flag,
+            force=force_flag,
+            as_json=as_json,
+            timeout=timeout_val,
+            parallel=parallel_flag,
+        )
     elif cmd == "validate":
         target_dir = getattr(args, "target", None)
         return cmd_validate(Path(target_dir) if target_dir else None, as_json=as_json)
