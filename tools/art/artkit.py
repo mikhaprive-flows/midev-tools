@@ -10,6 +10,7 @@ import importlib.util
 import json
 import shutil
 import sys
+import threading
 import traceback
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -35,12 +36,22 @@ from safepath import assert_safe_output_dir, is_within, safe_clean_output_dir, v
 from watcher import RecipeWatcher
 from PIL import Image
 
-# Global active configuration & cache
+# Global active configuration & concurrency lock
 CONFIG = MidevConfig.load()
 RECIPES = CONFIG.recipes_dir
 CURRENT_OUT_DIR = CONFIG.output_dir
 CURRENT_PREVIEW_DIR = CONFIG.previews_dir
 CACHE = BuildCache()
+BUILD_LOCK = threading.Lock()
+
+
+@dataclass
+class BuildContext:
+    config: MidevConfig
+    output_dir: Path
+    previews_dir: Path
+    palette_name: str
+    exporters: list[str]
 
 
 def apply_config(
@@ -50,7 +61,7 @@ def apply_config(
     palette_override: str | None = None,
     format_override: str | None = None,
     allow_external_output: bool = False,
-):
+) -> BuildContext:
     global CONFIG, RECIPES, CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR
     CONFIG = cfg
     RECIPES = cfg.recipes_dir
@@ -58,16 +69,19 @@ def apply_config(
     if out_override:
         p_out = Path(out_override).resolve()
         assert_safe_output_dir(p_out, allow_external=allow_external_output)
-        CURRENT_OUT_DIR = p_out
+        out_dir = p_out
     else:
-        CURRENT_OUT_DIR = cfg.output_dir
+        out_dir = cfg.output_dir
 
     if preview_override:
         p_prev = Path(preview_override).resolve()
         assert_safe_output_dir(p_prev, allow_external=allow_external_output)
-        CURRENT_PREVIEW_DIR = p_prev
+        prev_dir = p_prev
     else:
-        CURRENT_PREVIEW_DIR = cfg.previews_dir
+        prev_dir = cfg.previews_dir
+
+    CURRENT_OUT_DIR = out_dir
+    CURRENT_PREVIEW_DIR = prev_dir
 
     pal_name = palette_override or cfg.palette
     if pal_name:
@@ -82,6 +96,14 @@ def apply_config(
     else:
         formats = cfg.exporters
     pixelkit.set_active_exporters(formats)
+
+    return BuildContext(
+        config=cfg,
+        output_dir=out_dir,
+        previews_dir=prev_dir,
+        palette_name=pal_name,
+        exporters=formats,
+    )
 
 
 class Ctx:
@@ -342,154 +364,93 @@ def build_recipes(
     force: bool = False,
     out_dir: Path | None = None,
     preview_dir: Path | None = None,
+    context: BuildContext | None = None,
 ) -> BuildResult:
     """Core recipe build engine returning honest BuildResult without CLI prints."""
-    all_recipes = recipes()
-    all_dict = {p.stem: p for p in all_recipes}
-    todo: list[Path] = []
-    errors: list[dict[str, str]] = []
-    warnings: list[dict[str, Any]] = []
-    built: list[str] = []
-    skipped: list[str] = []
+    with BUILD_LOCK:
+        all_recipes = recipes()
+        all_dict = {p.stem: p for p in all_recipes}
+        todo: list[Path] = []
+        errors: list[dict[str, str]] = []
+        warnings: list[dict[str, Any]] = []
+        built: list[str] = []
+        skipped: list[str] = []
 
-    if names:
-        for name in names:
-            if name in all_dict:
-                todo.append(all_dict[name])
-            else:
-                errors.append({
-                    "recipe": name,
-                    "error": f"recipe not found: {name}",
-                    "traceback": "",
-                })
-    else:
-        todo = list(all_recipes)
+        if names:
+            for name in names:
+                if name in all_dict:
+                    todo.append(all_dict[name])
+                else:
+                    errors.append({
+                        "recipe": name,
+                        "error": f"recipe not found: {name}",
+                        "traceback": "",
+                    })
+        else:
+            todo = list(all_recipes)
 
-    active_proj = projects.get_active_project()
-    proj_id = active_proj.id if active_proj else "unknown"
+        active_proj = projects.get_active_project()
+        proj_id = active_proj.id if active_proj else "unknown"
 
-    out = out_dir or CURRENT_OUT_DIR
-    prev = preview_dir or CURRENT_PREVIEW_DIR
+        if context:
+            out = out_dir or context.output_dir
+            prev = preview_dir or context.previews_dir
+            pal_key = context.palette_name
+            pal_path = pixelkit.PAL.path if (pixelkit.PAL and pixelkit.PAL.path) else None
+            exps = context.exporters
+        else:
+            out = out_dir or CURRENT_OUT_DIR
+            prev = preview_dir or CURRENT_PREVIEW_DIR
+            pal_key = pixelkit.PAL.path.stem if (pixelkit.PAL and pixelkit.PAL.path) else "default"
+            pal_path = pixelkit.PAL.path if (pixelkit.PAL and pixelkit.PAL.path) else None
+            exps = pixelkit.ACTIVE_EXPORTERS
 
-    cache_file = out / ".midev-cache.json"
-    cache = BuildCache(cache_file=cache_file, project_id=proj_id)
+        cache_file = out / ".midev-cache.json"
+        cache = BuildCache(cache_file=cache_file, project_id=proj_id)
 
-    manifest_file = out / "manifest.json"
-    manifest = Manifest(manifest_file)
+        manifest_file = out / "manifest.json"
+        manifest = Manifest(manifest_file)
 
-    if clean:
-        cache.clear()
-        manifest.entries.clear()
-        manifest.save()
-        try:
-            safe_clean_output_dir(out)
-            safe_clean_output_dir(prev)
-        except Exception as e:
-            return BuildResult(
-                status="error",
-                project=proj_id,
-                built=[],
-                skipped=[],
-                errors=[{"recipe": "clean", "error": str(e), "traceback": ""}],
-                validation=ValidationResult(status="failed", violations=1, total_assets=0, assets=[]).to_dict(),
-            )
-
-    pal_key = pixelkit.PAL.path.stem if (pixelkit.PAL and pixelkit.PAL.path) else "default"
-    pal_path = pixelkit.PAL.path if (pixelkit.PAL and pixelkit.PAL.path) else None
-    exps = pixelkit.ACTIVE_EXPORTERS
-
-    if incremental and not force:
-        to_build = []
-        for p in todo:
-            if cache.is_dirty(p, palette=pal_key, exporters=exps, palette_path=pal_path):
-                to_build.append(p)
-            else:
-                skipped.append(p.stem)
-        todo = to_build
-
-    ctx = Ctx(out, prev)
-    for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
-        d.mkdir(parents=True, exist_ok=True)
-
-    try:
-        (ctx.assets / ".midev-output").write_text("midev build output\n", encoding="utf-8")
-        (ctx.preview / ".midev-output").write_text("midev build preview\n", encoding="utf-8")
-    except OSError:
-        pass
-
-    for p in todo:
-        manifest.load()
-        old_files = manifest.remove_recipe(p.stem)
-        for rel_f in old_files:
-            target_f = out / rel_f
-            if target_f.exists():
-                try:
-                    target_f.unlink()
-                except OSError:
-                    pass
-        manifest.save()
-
-        _clean_recipe_output(p.stem, ctx.assets)
-        _clean_recipe_output(p.stem, ctx.preview)
-
-        pixelkit.reset_build_stats()
-        pixelkit.set_current_recipe(p.stem, output_dir=out)
-        try:
-            mod = load(p)
-            mod.build(ctx)
-            recipe_outputs = _find_recipe_outputs(p.stem, ctx.assets, ctx.preview)
-
-            # Ensure any non-SheetBuilder PNGs created in ctx.assets are tracked in manifest
-            manifest.load()
-            for out_f in recipe_outputs:
-                if out_f.suffix.lower() == ".png" and is_within(out_f, ctx.assets):
-                    rel_p = out_f.relative_to(ctx.assets).as_posix()
-                    existing_entries = manifest.get_assets_for_recipe(p.stem)
-                    already_tracked = any(rel_p in e.files for e in existing_entries)
-                    if not already_tracked:
-                        cat = out_f.parent.relative_to(ctx.assets).as_posix() if out_f.parent != ctx.assets else "assets"
-                        asset_id = f"{cat}/{out_f.stem}"
-                        try:
-                            with Image.open(out_f) as im:
-                                w, h = im.size
-                        except Exception:
-                            w, h = 0, 0
-                        f_hash = hashlib.sha256(out_f.read_bytes()).hexdigest() if out_f.exists() else ""
-                        manifest.add_asset(
-                            AssetEntry(
-                                asset_id=asset_id,
-                                recipe=p.stem,
-                                category=cat,
-                                files=[rel_p],
-                                frame_size=[w, h],
-                                origin=[w // 2, h // 2],
-                                anims=["default"],
-                                hash=f_hash,
-                            )
-                        )
+        if clean:
+            cache.clear()
+            manifest.entries.clear()
             manifest.save()
+            try:
+                safe_clean_output_dir(out)
+                safe_clean_output_dir(prev)
+            except Exception as e:
+                return BuildResult(
+                    status="error",
+                    project=proj_id,
+                    built=[],
+                    skipped=[],
+                    errors=[{"recipe": "clean", "error": str(e), "traceback": ""}],
+                    validation=ValidationResult(status="failed", violations=1, total_assets=0, assets=[]).to_dict(),
+                )
 
-            cache.record(p, palette=pal_key, exporters=exps, palette_path=pal_path, output_files=recipe_outputs)
-            built.append(p.stem)
+        if incremental and not force:
+            to_build = []
+            for p in todo:
+                if cache.is_dirty(p, palette=pal_key, exporters=exps, palette_path=pal_path):
+                    to_build.append(p)
+                else:
+                    skipped.append(p.stem)
+            todo = to_build
 
-            stats = pixelkit.get_build_stats()
-            if stats["snapped_pixels"] > 0:
-                warnings.append({
-                    "recipe": p.stem,
-                    "warning": f"Snapped {stats['snapped_pixels']} pixel(s) to nearest palette colors",
-                    "snapped_pixels": stats["snapped_pixels"],
-                    "binarized_alpha": stats["binarized_alpha"],
-                })
-        except Exception as e:
-            tb = traceback.format_exc()
-            errors.append({
-                "recipe": p.stem,
-                "error": str(e),
-                "traceback": tb,
-            })
+        ctx = Ctx(out, prev)
+        for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
+            d.mkdir(parents=True, exist_ok=True)
+
+        try:
+            (ctx.assets / ".midev-output").write_text("midev build output\n", encoding="utf-8")
+            (ctx.preview / ".midev-output").write_text("midev build preview\n", encoding="utf-8")
+        except OSError:
+            pass
+
+        for p in todo:
             manifest.load()
-            failed_files = manifest.remove_recipe(p.stem)
-            for rel_f in failed_files:
+            old_files = manifest.remove_recipe(p.stem)
+            for rel_f in old_files:
                 target_f = out / rel_f
                 if target_f.exists():
                     try:
@@ -497,26 +458,95 @@ def build_recipes(
                     except OSError:
                         pass
             manifest.save()
+
             _clean_recipe_output(p.stem, ctx.assets)
             _clean_recipe_output(p.stem, ctx.preview)
-        finally:
-            pixelkit.set_current_recipe(None, None)
 
-    cache.save()
+            pixelkit.reset_build_stats()
+            pixelkit.set_current_recipe(p.stem, output_dir=out)
+            try:
+                mod = load(p)
+                mod.build(ctx)
+                recipe_outputs = _find_recipe_outputs(p.stem, ctx.assets, ctx.preview)
 
-    val = validate_assets(ctx.assets)
-    is_ok = len(errors) == 0 and val.violations == 0 and val.status == "passed"
-    status = "ok" if is_ok else "error"
+                # Ensure any non-SheetBuilder PNGs created in ctx.assets are tracked in manifest
+                manifest.load()
+                for out_f in recipe_outputs:
+                    if out_f.suffix.lower() == ".png" and is_within(out_f, ctx.assets):
+                        rel_p = out_f.relative_to(ctx.assets).as_posix()
+                        existing_entries = manifest.get_assets_for_recipe(p.stem)
+                        already_tracked = any(rel_p in e.files for e in existing_entries)
+                        if not already_tracked:
+                            cat = out_f.parent.relative_to(ctx.assets).as_posix() if out_f.parent != ctx.assets else "assets"
+                            asset_id = f"{cat}/{out_f.stem}"
+                            try:
+                                with Image.open(out_f) as im:
+                                    w, h = im.size
+                            except Exception:
+                                w, h = 0, 0
+                            f_hash = hashlib.sha256(out_f.read_bytes()).hexdigest() if out_f.exists() else ""
+                            manifest.add_asset(
+                                AssetEntry(
+                                    asset_id=asset_id,
+                                    recipe=p.stem,
+                                    category=cat,
+                                    files=[rel_p],
+                                    frame_size=[w, h],
+                                    origin=[w // 2, h // 2],
+                                    anims=["default"],
+                                    hash=f_hash,
+                                )
+                            )
+                manifest.save()
 
-    return BuildResult(
-        status=status,
-        project=proj_id,
-        built=built,
-        skipped=skipped,
-        warnings=warnings,
-        errors=errors,
-        validation=val.to_dict(),
-    )
+                cache.record(p, palette=pal_key, exporters=exps, palette_path=pal_path, output_files=recipe_outputs)
+                built.append(p.stem)
+
+                stats = pixelkit.get_build_stats()
+                if stats["snapped_pixels"] > 0:
+                    warnings.append({
+                        "recipe": p.stem,
+                        "warning": f"Snapped {stats['snapped_pixels']} pixel(s) to nearest palette colors",
+                        "snapped_pixels": stats["snapped_pixels"],
+                        "binarized_alpha": stats["binarized_alpha"],
+                    })
+            except Exception as e:
+                tb = traceback.format_exc()
+                errors.append({
+                    "recipe": p.stem,
+                    "error": str(e),
+                    "traceback": tb,
+                })
+                manifest.load()
+                failed_files = manifest.remove_recipe(p.stem)
+                for rel_f in failed_files:
+                    target_f = out / rel_f
+                    if target_f.exists():
+                        try:
+                            target_f.unlink()
+                        except OSError:
+                            pass
+                manifest.save()
+                _clean_recipe_output(p.stem, ctx.assets)
+                _clean_recipe_output(p.stem, ctx.preview)
+            finally:
+                pixelkit.set_current_recipe(None, None)
+
+        cache.save()
+
+        val = validate_assets(ctx.assets)
+        is_ok = len(errors) == 0 and val.violations == 0 and val.status == "passed"
+        status = "ok" if is_ok else "error"
+
+        return BuildResult(
+            status=status,
+            project=proj_id,
+            built=built,
+            skipped=skipped,
+            warnings=warnings,
+            errors=errors,
+            validation=val.to_dict(),
+        )
 
 
 def cmd_build(
@@ -544,12 +574,12 @@ def cmd_build(
     if result.warnings:
         print(f"[artkit] Warnings ({len(result.warnings)}):")
         for w in result.warnings:
-            print(f"  ⚠️ {w['recipe']}: {w['warning']}")
+            print(f"  [WARN] {w['recipe']}: {w['warning']}")
 
     if result.errors:
         print(f"[artkit] Encountered {len(result.errors)} error(s):")
         for err in result.errors:
-            print(f"  ❌ {err['recipe']}: {err['error']}")
+            print(f"  [ERROR] {err['recipe']}: {err['error']}")
             if err.get("traceback"):
                 for line in err["traceback"].strip().splitlines()[-3:]:
                     print(f"     {line}")

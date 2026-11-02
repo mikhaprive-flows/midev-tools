@@ -299,7 +299,13 @@ class StudioHandler(BaseHTTPRequestHandler):
             return
 
         # Trigger Build
-        if path.startswith("/api/build/"):
+        if path == "/api/build" or path == "/api/build/":
+            print("[studio] Triggering build for all recipes...")
+            ret = artkit.cmd_build([])
+            broadcast_event({"type": "reload", "recipe": "all", "target": "all"})
+            self.send_json({"status": "ok" if ret == 0 else "error", "recipe": "all", "target": "all"})
+            return
+        elif path.startswith("/api/build/"):
             target_name = path[len("/api/build/"):].strip()
             cfg = MidevConfig.load()
             recipe_name = get_recipe_for_asset(target_name, out_dir=cfg.output_dir)
@@ -320,13 +326,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         manifest_path = out_dir / "manifest.json"
         manifest = Manifest(manifest_path)
 
-        # Ensure output directory has assets; auto-build if completely empty
         png_list = list(out_dir.rglob("*.png")) if out_dir.exists() else []
-        if not png_list and not manifest.entries:
-            print(f"[studio] Output directory {out_dir} empty, auto-building active project recipes...")
-            artkit.cmd_build([])
-            manifest.load()
-            png_list = list(out_dir.rglob("*.png")) if out_dir.exists() else []
 
         assets = []
         if manifest.entries:
@@ -354,6 +354,7 @@ class StudioHandler(BaseHTTPRequestHandler):
                     "imageUrl": f"/assets/{png_rel}",
                     "metaUrl": f"/assets/{Path(png_rel).with_suffix('.json').as_posix()}" if has_meta else None,
                     "hasMeta": has_meta,
+                    "built": True,
                     "animations": entry.anims,
                 })
         else:
@@ -384,11 +385,27 @@ class StudioHandler(BaseHTTPRequestHandler):
                     "imageUrl": f"/assets/{rel.as_posix()}",
                     "metaUrl": f"/assets/{rel.with_suffix('.json').as_posix()}" if has_meta else None,
                     "hasMeta": has_meta,
+                    "built": True,
                     "animations": anims_list,
                 })
 
         recipes_list = [p.stem for p in artkit.recipes()]
         active_proj = projects.get_active_project()
+
+        # If no built assets, list available recipes as unbuilt entries without triggering builds
+        if not assets and recipes_list:
+            for r in recipes_list:
+                assets.append({
+                    "id": f"sprites/{r}",
+                    "name": r,
+                    "category": "sprites",
+                    "recipe": r,
+                    "imageUrl": None,
+                    "metaUrl": None,
+                    "hasMeta": False,
+                    "built": False,
+                    "animations": [],
+                })
 
         # Pick smart default
         default_asset = None
@@ -429,7 +446,26 @@ class StudioHandler(BaseHTTPRequestHandler):
         recipe_name = get_recipe_for_asset(name, out_dir=out_dir)
 
         if not png_file.exists():
-            artkit.cmd_build([recipe_name])
+            self.send_json({
+                "id": asset_id,
+                "name": name,
+                "category": cat,
+                "recipe": recipe_name,
+                "imageUrl": None,
+                "metaUrl": None,
+                "hasMeta": False,
+                "built": False,
+                "meta": {
+                    "name": name,
+                    "frameWidth": 0,
+                    "frameHeight": 0,
+                    "originX": 0,
+                    "originY": 0,
+                    "animations": {},
+                },
+                "status": "not_built",
+            })
+            return
 
         meta_data: dict[str, Any] = {}
         if meta_file and meta_file.exists():
@@ -500,16 +536,36 @@ def start_background_watcher():
     """Background watcher thread that signals SSE clients when active recipe files change."""
     def watcher_loop():
         mtimes: dict[Path, float] = {}
+        last_recipes_dir: Path | None = None
+        is_seeded = False
+
         while True:
             time.sleep(0.5)
             recipes_dir = artkit.CONFIG.recipes_dir
             if not recipes_dir.exists():
+                is_seeded = False
                 continue
 
+            # If project/recipes_dir changed or initial run, seed mtimes without building
+            if recipes_dir != last_recipes_dir or not is_seeded:
+                last_recipes_dir = recipes_dir
+                mtimes.clear()
+                for p in sorted(recipes_dir.glob("*.py")):
+                    if not p.name.startswith("_"):
+                        try:
+                            mtimes[p] = p.stat().st_mtime
+                        except OSError:
+                            pass
+                is_seeded = True
+                continue
+
+            # Detect modifications and newly created recipe files
+            current_files = set()
             changed = []
-            for p in recipes_dir.glob("*.py"):
+            for p in sorted(recipes_dir.glob("*.py")):
                 if p.name.startswith("_"):
                     continue
+                current_files.add(p)
                 try:
                     mt = p.stat().st_mtime
                     if p not in mtimes:
@@ -518,8 +574,13 @@ def start_background_watcher():
                     elif mt > mtimes[p]:
                         mtimes[p] = mt
                         changed.append(p.stem)
-                except Exception:
+                except OSError:
                     pass
+
+            # Detect deleted recipe files
+            for p in list(mtimes.keys()):
+                if p not in current_files:
+                    del mtimes[p]
 
             for rec in changed:
                 print(f"[studio-watcher] File changed: {rec}.py -> auto-rebuilding...")
