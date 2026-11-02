@@ -22,11 +22,8 @@ def get_venv_python(venv_dir: Path = VENV_DIR) -> Path:
 
 
 def is_running_in_venv() -> bool:
-    # Check if current interpreter is inside tools/.venv
     try:
-        cur_exe = Path(sys.executable).resolve()
-        expected = get_venv_python().resolve()
-        return cur_exe == expected
+        return Path(sys.prefix).resolve() == VENV_DIR.resolve()
     except Exception:
         return False
 

@@ -13,6 +13,13 @@ from exporters import list_available_exporters
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
+def get_venv_python(root: Path = ROOT_DIR) -> Path:
+    """Return platform-appropriate virtualenv Python executable path."""
+    if sys.platform == "win32":
+        return root / "tools" / ".venv" / "Scripts" / "python.exe"
+    return root / "tools" / ".venv" / "bin" / "python"
+
+
 def run_doctor(as_json: bool = False) -> int:
     checks = []
 
@@ -33,10 +40,7 @@ def run_doctor(as_json: bool = False) -> int:
     check("Python Runtime", py_ok, f"{py_ver} ({sys.executable})")
 
     # 2. Virtual environment
-    if sys.platform == "win32":
-        venv_py = ROOT_DIR / "tools" / ".venv" / "Scripts" / "python.exe"
-    else:
-        venv_py = ROOT_DIR / "tools" / ".venv" / "bin" / "python"
+    venv_py = get_venv_python(ROOT_DIR)
     check("Virtual Environment", venv_py.exists(), f"{venv_py}")
 
     # 3. Pillow library
@@ -46,21 +50,14 @@ def run_doctor(as_json: bool = False) -> int:
     except ImportError as e:
         check("Pillow (Graphics)", False, str(e))
 
-    # 4. NumPy library
-    try:
-        import numpy
-        check("NumPy (Arrays)", True, f"v{numpy.__version__}")
-    except ImportError as e:
-        check("NumPy (Arrays)", False, str(e))
-
-    # 5. resvg-py (SVG engine)
+    # 4. resvg-py (SVG engine)
     try:
         import resvg_py
         check("resvg-py (Vector Engine)", True, f"v{getattr(resvg_py, '__version__', 'installed')}")
     except ImportError as e:
         check("resvg-py (Vector Engine)", False, str(e))
 
-    # 6. Master Project Configuration
+    # 5. Master Project Configuration
     cfg_path = ROOT_DIR / "config" / "midev.config.json"
     check("Project Config", cfg_path.exists(), f"{cfg_path}")
 

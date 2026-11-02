@@ -27,6 +27,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+if sys.version_info < (3, 12):
+    sys.exit(f"[midev] Error: Python 3.12 or newer is required (found {sys.version.split()[0]}). Please upgrade Python.")
+
 ROOT_DIR = Path(__file__).resolve().parent
 ART_TOOLS_DIR = ROOT_DIR / "tools" / "art"
 VENV_DIR = ROOT_DIR / "tools" / ".venv"
@@ -43,26 +46,27 @@ def ensure_venv_execution():
     if os.environ.get("MIDEV_NO_VENV_BOOTSTRAP"):
         return
 
-    # If already running inside a virtual environment, continue
+    # If already running inside tools/.venv or any active venv, continue
+    try:
+        if Path(sys.prefix).resolve() == VENV_DIR.resolve():
+            return
+    except Exception:
+        pass
+
     if hasattr(sys, "real_prefix") or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix):
         return
 
     venv_py = get_venv_python()
-    cur_py = Path(sys.executable).resolve()
-
-    # If already running inside tools/.venv, continue
-    if venv_py.exists() and cur_py == venv_py.resolve():
-        return
-
-    # If setup was explicitly requested with system python, let setup run directly
-    if len(sys.argv) > 1 and sys.argv[1] == "setup":
-        return
 
     # If .venv exists, re-spawn with venv Python
     if venv_py.exists():
         cmd = [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]]
         ret = subprocess.call(cmd)
         sys.exit(ret)
+
+    # Commands that do not require external dependencies must not trigger venv bootstrap
+    if len(sys.argv) > 1 and sys.argv[1] in ("git", "test", "tests", "doctor", "setup", "--help", "-h"):
+        return
 
     # If .venv does NOT exist, bootstrap it first
     print("[midev] Virtual environment not found. Initializing tools/.venv automatically...")
@@ -77,6 +81,8 @@ def ensure_venv_execution():
         cmd = [str(venv_py), str(Path(__file__).resolve()), *sys.argv[1:]]
         ret = subprocess.call(cmd)
         sys.exit(ret)
+
+
 
 
 def main():
@@ -132,6 +138,11 @@ def main():
     elif first == "mcp":
         import mcp_server
         return mcp_server.main()
+
+    elif first == "doctor":
+        from diagnostics import run_doctor
+        as_json = "--json" in argv
+        return run_doctor(as_json=as_json)
 
     else:
         # Route to artkit (build, watch, palette, validate, new, list, doctor, info)
