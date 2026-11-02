@@ -42,7 +42,7 @@ RECIPES = CONFIG.recipes_dir
 CURRENT_OUT_DIR = CONFIG.output_dir
 CURRENT_PREVIEW_DIR = CONFIG.previews_dir
 CACHE = BuildCache()
-BUILD_LOCK = threading.Lock()
+BUILD_LOCK = threading.RLock()
 
 
 @dataclass

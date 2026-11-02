@@ -6,11 +6,13 @@ Requires zero external dependencies (100% Python standard library).
 """
 from __future__ import annotations
 
+import concurrent.futures
 import contextlib
 import io
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -21,7 +23,9 @@ import artkit
 import inspect_tool
 import projects
 from config import MidevConfig
-from safepath import validate_name
+from safepath import is_within, validate_name
+
+SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2024-10-07")
 
 CANVAS_CHEATSHEET = """# midev pixelkit.Canvas API Cheat Sheet for AI Agents
 
@@ -79,7 +83,10 @@ def build(ctx):
 class MCPServer:
     def __init__(self):
         self.running = True
-        self._stdout = sys.__stdout__ or sys.stdout
+        self._stdout = sys.__stdout__ if sys.__stdout__ is not None else sys.stdout
+        self._write_lock = threading.Lock()
+        self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        self._last_build_errors: dict[str, Any] = {}
         self.cfg = MidevConfig.load()
         artkit.apply_config(self.cfg)
 
@@ -90,8 +97,9 @@ class MCPServer:
             "result": result,
         }
         raw = json.dumps(msg) + "\n"
-        self._stdout.write(raw)
-        self._stdout.flush()
+        with self._write_lock:
+            self._stdout.write(raw)
+            self._stdout.flush()
 
     def send_error(self, response_id: Any, code: int, message: str, data: Any = None):
         msg = {
@@ -100,18 +108,53 @@ class MCPServer:
             "error": {
                 "code": code,
                 "message": message,
-                "data": data,
             },
         }
+        if data is not None:
+            msg["error"]["data"] = data
         raw = json.dumps(msg) + "\n"
-        self._stdout.write(raw)
-        self._stdout.flush()
+        with self._write_lock:
+            self._stdout.write(raw)
+            self._stdout.flush()
 
-    def handle_initialize(self, req_id: Any, params: dict[str, Any]):
+    def send_tool_result(self, req_id: Any, payload: Any, is_error: bool = False):
+        text = json.dumps(payload, indent=2) if not isinstance(payload, str) else payload
+        res: dict[str, Any] = {
+            "content": [
+                {
+                    "type": "text",
+                    "text": text,
+                }
+            ]
+        }
+        if is_error:
+            res["isError"] = True
+        self.send_response(req_id, res)
+
+    def send_tool_error(self, req_id: Any, message: str, traceback_str: str | None = None):
+        text = message
+        if traceback_str:
+            text = f"{message}\n\nTraceback:\n{traceback_str}"
         self.send_response(
             req_id,
             {
-                "protocolVersion": "2024-11-05",
+                "isError": True,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": text,
+                    }
+                ],
+            },
+        )
+
+    def handle_initialize(self, req_id: Any, params: dict[str, Any]):
+        client_ver = params.get("protocolVersion") if isinstance(params, dict) else None
+        negotiated = client_ver if client_ver in SUPPORTED_PROTOCOL_VERSIONS else SUPPORTED_PROTOCOL_VERSIONS[0]
+        self.send_response(
+            req_id,
+            {
+                "protocolVersion": negotiated,
                 "capabilities": {
                     "tools": {},
                 },
@@ -132,7 +175,7 @@ class MCPServer:
                     "properties": {
                         "project": {
                             "type": "string",
-                            "description": "Optional project id to inspect (defaults to active project)",
+                            "description": "Optional project id or directory name to inspect (defaults to active project)",
                         }
                     },
                 },
@@ -161,7 +204,7 @@ class MCPServer:
             },
             {
                 "name": "midev_inspect_recipe",
-                "description": "Generate an annotated multimodal visual verification sheet (4x scale) with frame numbers, origin crosshairs, and palette swatches. Returns the sheet image path for vision review.",
+                "description": "Generate an annotated multimodal visual verification sheet (1-16x scale) with frame numbers, origin crosshairs, and palette swatches. Returns the sheet image path for vision review.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -171,7 +214,9 @@ class MCPServer:
                         },
                         "scale": {
                             "type": "integer",
-                            "description": "Scale factor for pixels (default 4)",
+                            "minimum": 1,
+                            "maximum": 16,
+                            "description": "Scale factor for pixels (1 to 16, default 4)",
                         },
                     },
                     "required": ["recipe"],
@@ -185,7 +230,7 @@ class MCPServer:
                     "properties": {
                         "target": {
                             "type": "string",
-                            "description": "Optional directory path to validate",
+                            "description": "Optional directory path to validate (must be inside export/ or active project)",
                         }
                     },
                 },
@@ -206,7 +251,7 @@ class MCPServer:
                     "properties": {
                         "project_id": {
                             "type": "string",
-                            "description": "Project ID to activate",
+                            "description": "Project ID or directory name to activate",
                         }
                     },
                     "required": ["project_id"],
@@ -231,134 +276,226 @@ class MCPServer:
                     "required": ["name", "template"],
                 },
             },
+            {
+                "name": "midev_get_build_errors",
+                "description": "Retrieve the full stack traces and diagnostic errors from the most recent build execution.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                },
+            },
         ]
         self.send_response(req_id, {"tools": tools})
 
-    def handle_tools_call(self, req_id: Any, params: dict[str, Any]):
-        name = params.get("name")
-        args = params.get("arguments", {})
-
+    def _dispatch_tool_call(self, req_id: Any, params: dict[str, Any]):
         # Safety belt: redirect stdout to stderr during tool execution
         # to ensure user recipes or helpers calling print() never pollute the JSON-RPC stream
         with contextlib.redirect_stdout(sys.stderr):
             try:
-                if name == "midev_list_recipes":
-                    proj_arg = args.get("project")
-                    if proj_arg:
-                        target = projects.get_project_by_name(proj_arg)
-                        target_recs = [p.stem for p in target.recipes_dir.glob("*.py") if not p.name.startswith("_")] if target.recipes_dir.exists() else []
-                        res_data = {
-                            "activeProject": target.to_dict(),
-                            "recipes": target_recs,
-                            "total": len(target_recs),
-                            "palette": target.palette,
-                        }
-                    else:
-                        active = projects.get_active_project()
-                        recs = [p.stem for p in artkit.recipes()]
-                        res_data = {
-                            "activeProject": active.to_dict(),
-                            "recipes": recs,
-                            "total": len(recs),
-                            "palette": self.cfg.palette,
-                        }
-                    self.send_tool_result(req_id, res_data)
-
-                elif name == "midev_build_recipe":
-                    rec_list = args.get("recipes", [])
-                    known_recipes = {p.stem for p in artkit.recipes()}
-                    for r in rec_list:
-                        try:
-                            validate_name(r, "recipe name")
-                        except ValueError as e:
-                            self.send_error(req_id, -32602, str(e))
-                            return
-                        if r not in known_recipes:
-                            self.send_error(req_id, -32602, f"Recipe not found: '{r}'. Available recipes: {sorted(list(known_recipes))}")
-                            return
-
-                    pal_override = args.get("palette")
-                    force = args.get("force", True)
-                    if pal_override:
-                        artkit.apply_config(self.cfg, palette_override=pal_override)
-                    res = artkit.build_recipes(rec_list, force=force)
-                    self.send_tool_result(req_id, {
-                        "status": res.status,
-                        "project": res.project,
-                        "recipesBuilt": res.built,
-                        "skipped": res.skipped,
-                        "errors": res.errors,
-                        "validation": res.validation,
-                        "outputDir": str(artkit.CONFIG.output_dir),
-                    })
-
-                elif name == "midev_inspect_recipe":
-                    rec = args.get("recipe")
-                    scale = int(args.get("scale", 4))
-                    sheet_data = inspect_tool.generate_inspection_sheet(rec, scale=scale)
-                    self.send_tool_result(req_id, sheet_data)
-
-                elif name == "midev_validate_assets":
-                    target = args.get("target")
-                    t_path = Path(target) if target else None
-                    val = artkit.validate_assets(t_path)
-                    self.send_tool_result(req_id, {
-                        "status": val.status,
-                        "violations": val.violations,
-                        "totalAssets": val.total_assets,
-                        "failedAssets": [a for a in val.assets if not a.get("passed")],
-                        "targetDir": str(t_path or artkit.CONFIG.output_dir),
-                    })
-
-                elif name == "midev_get_canvas_docs":
-                    self.send_tool_result(req_id, {"docs": CANVAS_CHEATSHEET})
-
-                elif name == "midev_switch_project":
-                    pid = args.get("project_id", "")
-                    switched = projects.set_active_project(pid)
-                    self.cfg = MidevConfig.load()
-                    artkit.apply_config(self.cfg)
-                    self.send_tool_result(req_id, {
-                        "status": "ok",
-                        "switchedTo": switched.to_dict(),
-                    })
-
-                elif name == "midev_generate_template":
-                    t_name = args.get("name", "")
-                    t_kind = args.get("template", "character")
-                    try:
-                        t_name = validate_name(t_name, "recipe name")
-                    except ValueError as e:
-                        self.send_error(req_id, -32602, str(e))
-                        return
-                    ret = artkit.cmd_new(t_name, template_type=t_kind)
-                    self.send_tool_result(req_id, {
-                        "status": "ok" if ret == 0 else "error",
-                        "recipe": t_name,
-                        "template": t_kind,
-                        "path": str(artkit.CONFIG.recipes_dir / f"{t_name}.py"),
-                    })
-
-                else:
-                    self.send_error(req_id, -32601, f"Unknown tool: {name}")
-
+                self.handle_tools_call(req_id, params)
             except Exception as e:
                 import traceback
-                self.send_error(req_id, -32000, f"Tool execution failed: {e}", data={"traceback": traceback.format_exc()})
+                self.send_tool_error(req_id, f"Tool execution failed: {e}", traceback_str=traceback.format_exc())
 
-    def send_tool_result(self, req_id: Any, payload: Any):
-        text = json.dumps(payload, indent=2) if not isinstance(payload, str) else payload
-        self.send_response(
-            req_id,
-            {
-                "content": [
-                    {
-                        "type": "text",
-                        "text": text,
-                    }
-                ]
-            },
-        )
+    def handle_tools_call(self, req_id: Any, params: dict[str, Any]):
+        if not isinstance(params, dict):
+            self.send_tool_error(req_id, f"Invalid params: expected object, got {type(params).__name__}")
+            return
+
+        name = params.get("name")
+        if not name or not isinstance(name, str):
+            self.send_tool_error(req_id, "Missing or invalid tool name")
+            return
+
+        args = params.get("arguments", {})
+        if not isinstance(args, dict):
+            self.send_tool_error(req_id, f"Invalid arguments: expected object, got {type(args).__name__}")
+            return
+
+        if name == "midev_list_recipes":
+            proj_arg = args.get("project")
+            if proj_arg is not None:
+                if not isinstance(proj_arg, str):
+                    self.send_tool_error(req_id, f"Invalid argument 'project': expected string, got {type(proj_arg).__name__}")
+                    return
+                try:
+                    target = projects.get_project_by_name(proj_arg)
+                except ValueError as e:
+                    self.send_tool_error(req_id, str(e))
+                    return
+                target_recs = [p.stem for p in target.recipes_dir.glob("*.py") if not p.name.startswith("_")] if target.recipes_dir.exists() else []
+                res_data = {
+                    "activeProject": target.to_dict(),
+                    "recipes": sorted(target_recs),
+                    "total": len(target_recs),
+                    "palette": target.palette,
+                }
+            else:
+                active = projects.get_active_project()
+                recs = [p.stem for p in artkit.recipes()]
+                res_data = {
+                    "activeProject": active.to_dict(),
+                    "recipes": sorted(recs),
+                    "total": len(recs),
+                    "palette": self.cfg.palette,
+                }
+            self.send_tool_result(req_id, res_data)
+
+        elif name == "midev_build_recipe":
+            rec_list = args.get("recipes", [])
+            if not isinstance(rec_list, list) or any(not isinstance(r, str) for r in rec_list):
+                self.send_tool_error(req_id, f"Invalid argument 'recipes': expected array of strings, got {rec_list!r}")
+                return
+
+            known_recipes = {p.stem for p in artkit.recipes()}
+            for r in rec_list:
+                try:
+                    validate_name(r, "recipe name")
+                except ValueError as e:
+                    self.send_tool_error(req_id, str(e))
+                    return
+                if r not in known_recipes:
+                    self.send_tool_error(req_id, f"Recipe not found: '{r}'. Available recipes: {sorted(list(known_recipes))}")
+                    return
+
+            pal_override = args.get("palette")
+            if pal_override is not None and not isinstance(pal_override, str):
+                self.send_tool_error(req_id, f"Invalid argument 'palette': expected string, got {type(pal_override).__name__}")
+                return
+
+            force = args.get("force", True)
+            if not isinstance(force, bool):
+                self.send_tool_error(req_id, f"Invalid argument 'force': expected boolean, got {type(force).__name__}")
+                return
+
+            with artkit.BUILD_LOCK:
+                if pal_override:
+                    artkit.apply_config(self.cfg, palette_override=pal_override)
+                res = artkit.build_recipes(rec_list, force=force)
+
+            self._last_build_errors = res.errors or {}
+            is_err = (res.status != "ok") or bool(res.errors)
+            self.send_tool_result(req_id, {
+                "status": res.status,
+                "project": res.project,
+                "recipesBuilt": res.built,
+                "skipped": res.skipped,
+                "errors": res.errors,
+                "validation": res.validation,
+                "outputDir": str(artkit.CONFIG.output_dir),
+            }, is_error=is_err)
+
+        elif name == "midev_inspect_recipe":
+            rec = args.get("recipe")
+            if not rec or not isinstance(rec, str):
+                self.send_tool_error(req_id, "Missing required string argument 'recipe'")
+                return
+            try:
+                rec = validate_name(rec, "recipe name")
+            except ValueError as e:
+                self.send_tool_error(req_id, str(e))
+                return
+
+            scale_val = args.get("scale", 4)
+            if isinstance(scale_val, bool) or not isinstance(scale_val, int) or not (1 <= scale_val <= 16):
+                self.send_tool_error(req_id, f"Invalid argument 'scale': expected integer between 1 and 16, got {scale_val!r}")
+                return
+
+            with artkit.BUILD_LOCK:
+                sheet_data = inspect_tool.generate_inspection_sheet(rec, scale=scale_val)
+
+            self.send_tool_result(req_id, sheet_data)
+
+        elif name == "midev_validate_assets":
+            target = args.get("target")
+            if target is not None:
+                if not isinstance(target, str):
+                    self.send_tool_error(req_id, f"Invalid argument 'target': expected string, got {type(target).__name__}")
+                    return
+                t_path = Path(target).resolve()
+                export_root = (ROOT_DIR / "export").resolve()
+                active = projects.get_active_project()
+                proj_root = active.path.resolve() if active else None
+
+                allowed = is_within(t_path, export_root) or (proj_root is not None and is_within(t_path, proj_root))
+                if not allowed:
+                    self.send_tool_error(
+                        req_id,
+                        f"Target directory '{target}' is not within export/ or active project directory."
+                    )
+                    return
+                if not t_path.exists() or not t_path.is_dir():
+                    self.send_tool_error(req_id, f"Target directory '{target}' does not exist or is not a directory.")
+                    return
+            else:
+                t_path = None
+
+            val = artkit.validate_assets(t_path)
+            is_err = (val.status != "ok") or (val.violations > 0)
+            self.send_tool_result(req_id, {
+                "status": val.status,
+                "violations": val.violations,
+                "totalAssets": val.total_assets,
+                "failedAssets": [a for a in val.assets if not a.get("passed")],
+                "targetDir": str(t_path or artkit.CONFIG.output_dir),
+            }, is_error=is_err)
+
+        elif name == "midev_get_canvas_docs":
+            self.send_tool_result(req_id, {"docs": CANVAS_CHEATSHEET})
+
+        elif name == "midev_get_build_errors":
+            self.send_tool_result(req_id, {
+                "errors": self._last_build_errors,
+                "count": len(self._last_build_errors),
+            })
+
+        elif name == "midev_switch_project":
+            pid = args.get("project_id")
+            if not pid or not isinstance(pid, str):
+                self.send_tool_error(req_id, "Missing required string argument 'project_id'")
+                return
+            try:
+                switched = projects.set_active_project(pid)
+                self.cfg = MidevConfig.load()
+                artkit.apply_config(self.cfg)
+                self.send_tool_result(req_id, {
+                    "status": "ok",
+                    "switchedTo": switched.to_dict(),
+                })
+            except Exception as e:
+                self.send_tool_error(req_id, f"Failed to switch project: {e}")
+
+        elif name == "midev_generate_template":
+            t_name = args.get("name")
+            t_kind = args.get("template")
+            if not t_name or not isinstance(t_name, str):
+                self.send_tool_error(req_id, "Missing required string argument 'name'")
+                return
+            if not t_kind or not isinstance(t_kind, str):
+                self.send_tool_error(req_id, "Missing required string argument 'template'")
+                return
+            if t_kind not in {"character", "autotile", "vfx", "ui"}:
+                self.send_tool_error(req_id, f"Invalid template: '{t_kind}'. Expected one of: character, autotile, vfx, ui")
+                return
+            try:
+                t_name = validate_name(t_name, "recipe name")
+            except ValueError as e:
+                self.send_tool_error(req_id, str(e))
+                return
+
+            ret = artkit.cmd_new(t_name, template_type=t_kind)
+            if ret != 0:
+                self.send_tool_error(req_id, f"Failed to generate template '{t_kind}' for recipe '{t_name}'")
+                return
+            self.send_tool_result(req_id, {
+                "status": "ok",
+                "recipe": t_name,
+                "template": t_kind,
+                "path": str(artkit.CONFIG.recipes_dir / f"{t_name}.py"),
+            })
+
+        else:
+            self.send_tool_error(req_id, f"Unknown tool: '{name}'")
 
     def run(self):
         # Read standard input JSON-RPC messages line by line
@@ -385,10 +522,12 @@ class MCPServer:
             elif method == "tools/list":
                 self.handle_tools_list(req_id)
             elif method == "tools/call":
-                self.handle_tools_call(req_id, params)
+                self._executor.submit(self._dispatch_tool_call, req_id, params)
             else:
                 if req_id is not None:
                     self.send_error(req_id, -32601, f"Method not found: {method}")
+
+        self._executor.shutdown(wait=True)
 
 
 def main():
