@@ -34,6 +34,11 @@ class CharacterConfig:
     shield: str | None = None     # "wood_shield", "buckler", None
 
     def __post_init__(self):
+        if self.width <= 0:
+            raise ValueError(f"width must be positive, got {self.width}")
+        if self.height <= 0:
+            raise ValueError(f"height must be positive, got {self.height}")
+
         def check_field(field_name: str, value: Any, valid_set: set[Any]):
             if value is None and None in valid_set:
                 return

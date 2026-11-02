@@ -58,7 +58,7 @@ SEMANTIC_FALLBACKS: dict[str, list[str]] = {
     "skin_shade": ["skin_shade", "peach", "brown", "tan"],
     "forest": ["forest", "dark_green", "green"],
     "forest_dark": ["forest_dark", "dark_green", "black"],
-    "dark_green": ["dark_green", "forest_dark", "forest", "green", "black"],
+    "dark_green": ["dark_green", "forest_dark", "forest", "green"],
     "grass": ["grass", "green", "bright_green"],
     "grass_light": ["grass_light", "light_green", "green", "yellow"],
     "water": ["water", "blue", "dark_blue", "sky_blue"],
@@ -122,6 +122,7 @@ class Palette:
         self.strict: bool = strict
         self.preview_bg: RGBA = (43, 40, 64, 255)
         self.last_snap_stats: SnapStats = SnapStats()
+        self._warned_fallbacks: set[str] = set()
         if self.path and self.path.exists():
             self.load(self.path)
 
@@ -228,6 +229,16 @@ class Palette:
         if k_lower in SEMANTIC_FALLBACKS:
             for fallback_name in SEMANTIC_FALLBACKS[k_lower]:
                 if fallback_name in self.names:
+                    if fallback_name != k_lower:
+                        if k_lower not in getattr(self, "_warned_fallbacks", set()):
+                            if not hasattr(self, "_warned_fallbacks"):
+                                self._warned_fallbacks = set()
+                            self._warned_fallbacks.add(k_lower)
+                            warnings.warn(
+                                f"Color '{key}' substituted with fallback '{fallback_name}' in palette '{self.name}'.",
+                                UserWarning,
+                                stacklevel=2,
+                            )
                     return self.names[fallback_name]
 
         if not self.strict:

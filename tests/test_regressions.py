@@ -432,6 +432,55 @@ class TestRegressions(unittest.TestCase):
             self.assertEqual(data["tiles"][0]["name"], "island_single")
             self.assertEqual(data["tiles"][46]["name"], "center")
 
+    def test_recipe_print_does_not_corrupt_json_stdout(self):
+        """Recipe stdout prints must be redirected to stderr so CLI build --json stdout remains valid JSON."""
+        repo = self._get_temp_repo()
+        noisy_recipe = repo / "samples" / "fisharium" / "recipes" / "noisy.py"
+        noisy_recipe.write_text(
+            'from pixelkit import SheetBuilder, Canvas\n'
+            'def build(ctx):\n'
+            '    print("halo from noisy recipe")\n'
+            '    sb = SheetBuilder("noisy", 16, 16)\n'
+            '    c = Canvas(16, 16)\n'
+            '    sb.add("idle", [c])\n'
+            '    sb.save(ctx.sprites)\n',
+            encoding="utf-8",
+        )
+        code, out, err = run_cli(["build", "noisy", "--json"], cwd=repo)
+        self.assertEqual(code, 0, f"Build failed: {err}")
+        self.assertIn("halo from noisy recipe", err, "Recipe stdout print should be routed to stderr")
+        try:
+            data = json.loads(out)
+        except json.JSONDecodeError as e:
+            self.fail(f"stdout is not valid JSON: {e}\nstdout was:\n{out}")
+        self.assertEqual(data.get("status"), "ok")
+        self.assertIn("noisy", data.get("built", []))
+
+    def test_character_config_dimensions_validation(self):
+        """CharacterConfig must reject width <= 0 and height <= 0 with ValueError."""
+        from generators.character import CharacterConfig
+
+        with self.assertRaises(ValueError):
+            CharacterConfig(width=0)
+        with self.assertRaises(ValueError):
+            CharacterConfig(width=-4)
+        with self.assertRaises(ValueError):
+            CharacterConfig(height=0)
+        with self.assertRaises(ValueError):
+            CharacterConfig(height=-10)
+
+    def test_palette_fallback_warning(self):
+        """Semantic fallback substituting a different color name must emit a UserWarning."""
+        import warnings
+        from palette_kit import Palette
+
+        pal = Palette(path="test_pal", colors=[(34, 139, 34, 255)], names={"forest_dark": (34, 139, 34, 255)})
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            col = pal["dark_green"]
+            self.assertEqual(col, (34, 139, 34, 255))
+            self.assertTrue(any("substituted with fallback 'forest_dark'" in str(item.message) for item in w))
+
 
 if __name__ == "__main__":
     unittest.main()

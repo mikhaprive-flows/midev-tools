@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import hashlib
 import importlib.util
 import json
@@ -586,7 +587,8 @@ def build_recipes(
                         "warning": f"skipped (no build()): {p.stem}",
                     })
                     continue
-                mod.build(ctx)
+                with contextlib.redirect_stdout(sys.stderr):
+                    mod.build(ctx)
                 recipe_outputs = _find_recipe_outputs(p.stem, ctx.assets, ctx.preview)
 
                 # Ensure any non-SheetBuilder PNGs created in ctx.assets are tracked in manifest
