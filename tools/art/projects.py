@@ -150,14 +150,14 @@ def discover_projects(active_id_override: str | None = None) -> list[ProjectInfo
     samples_dir = ROOT_DIR / "samples"
     if samples_dir.exists():
         for d in sorted(samples_dir.iterdir()):
-            if d.is_dir() and not d.name.startswith((".", "_")):
+            if d.is_dir() and not d.name.startswith((".", "_")) and (d / "recipes").exists():
                 results.append(_load_project_dir(d, "sample", active_id))
 
     # 2. Projects Directory
     projects_dir = ROOT_DIR / "projects"
     if projects_dir.exists():
         for d in sorted(projects_dir.iterdir()):
-            if d.is_dir() and not d.name.startswith((".", "_")):
+            if d.is_dir() and not d.name.startswith((".", "_")) and (d / "recipes").exists():
                 results.append(_load_project_dir(d, "project", active_id))
 
     # Fallback if no projects found at all

@@ -21,7 +21,7 @@ import sys
 from pathlib import Path
 from PIL import Image
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 if str(ROOT / "tools" / "art") not in sys.path:
     sys.path.insert(0, str(ROOT / "tools" / "art"))
 
