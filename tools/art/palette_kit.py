@@ -238,9 +238,10 @@ class Palette:
             if self.colors:
                 return self.colors[0]
 
-        # Strict mode (default): Suggest close match via difflib
-        all_candidates = list(self.names.keys()) + list(SEMANTIC_FALLBACKS.keys())
-        suggestions = difflib.get_close_matches(k_lower, all_candidates, n=3, cutoff=0.5)
+        # Strict mode (default): Suggest close match via difflib without duplicates
+        all_candidates = list(dict.fromkeys(list(self.names.keys()) + list(SEMANTIC_FALLBACKS.keys())))
+        raw_matches = difflib.get_close_matches(k_lower, all_candidates, n=6, cutoff=0.5)
+        suggestions = list(dict.fromkeys(raw_matches))[:3]
         hint = f". Did you mean: {', '.join(repr(s) for s in suggestions)}?" if suggestions else ""
         raise KeyError(f"Color '{key}' not found in palette '{self.name}'{hint}")
 

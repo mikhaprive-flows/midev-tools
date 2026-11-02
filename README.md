@@ -250,9 +250,10 @@ midev_art_tools/
 
 ## 🔒 Security Model
 
-- **Arbitrary Python Execution**: Recipes (`recipes/*.py`) are Python scripts dynamically executed by the build engine. Only load, inspect, and build projects from trusted sources. Never build untrusted third-party recipes.
-- **MCP Server Boundaries**: The Model Context Protocol (MCP) server exposes tools to local AI agents via stdio. All asset outputs, template generations, and validations are restricted to project workspaces and the `export/` directory. Target directories outside the repository tree require explicit confirmation.
-- **Studio Web Server Protection**: The local Studio server runs strictly on `localhost`/`127.0.0.1` and implements session token verification (`X-Midev-Token`), Host header validation (preventing DNS rebinding), strict Origin/CORS validation (preventing CSRF), and path traversal containment.
+- **Arbitrary Python Execution**: Recipes (`recipes/*.py`) are executable Python scripts dynamically evaluated by the build engine. Only load, inspect, and build recipes and projects from trusted sources. Never build untrusted third-party recipes.
+- **Studio Web Server Protection**: The local Studio server runs strictly on `localhost`/`127.0.0.1` and enforces mandatory session token verification (`X-Midev-Token`), Host header validation (preventing DNS rebinding), strict Origin/CORS validation (preventing CSRF from foreign origins or other local ports), and path traversal containment.
+- **Safe Cleaning Boundaries (`--clean`)**: Cleaning output directories is strictly bounded by safety markers (`.midev-output`), manifest-based asset tracking, and strict path containment checks. Wiping root drives, user home directories, the repository root itself, or unapproved external directories is permanently blocked.
+- **MCP Server Boundaries**: The Model Context Protocol (MCP) server exposes tools to local AI agents via stdio. All asset outputs, template generations, and validations are restricted to project workspaces and the `export/` directory. Target directories outside the repository tree require explicit approval via `--allow-external-output`.
 
 ---
 
