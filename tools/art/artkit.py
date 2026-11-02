@@ -248,13 +248,42 @@ class BuildResult:
 
 
 
-def _clean_recipe_output(stem: str, target_dir: Path):
-    """Safely wipe old output files belonging to recipe before building."""
+INTERNAL_FILES = {
+    "manifest.json",
+    "manifest.json.tmp",
+    "manifest.json.lock",
+    "manifest.json.corrupt",
+    ".midev-cache.json",
+    ".midev-cache.json.tmp",
+    ".midev-cache.json.lock",
+    ".midev-cache.json.corrupt",
+    ".midev-output",
+}
+
+
+def _clean_recipe_output(stem: str, target_dir: Path, manifest: Manifest | None = None):
+    """Safely wipe old output files belonging strictly to recipe before building."""
     if not target_dir.exists():
         return
-    for f in target_dir.rglob("*"):
+
+    other_recipes_files: set[str] = set()
+    if manifest:
+        for entry in manifest.entries.values():
+            if entry.recipe != stem:
+                other_recipes_files.update(entry.files)
+
+    for f in list(target_dir.rglob("*")):
         if f.is_file():
-            if f.stem == stem or f.stem.startswith(f"{stem}_") or f.name.startswith(f"{stem}."):
+            if f.name in INTERNAL_FILES:
+                continue
+            try:
+                rel = f.relative_to(target_dir).as_posix()
+                if rel in other_recipes_files:
+                    continue
+            except ValueError:
+                pass
+            # Exact match only: f.stem == stem (never prefix f.stem.startswith(f"{stem}_"))
+            if f.stem == stem:
                 try:
                     f.unlink()
                 except OSError:
@@ -273,7 +302,7 @@ def _find_recipe_outputs(stem: str, *target_dirs: Path) -> list[Path]:
                 m = Manifest(manifest_file)
                 for rel_f in m.get_files_for_recipe(stem):
                     p = (d / rel_f).resolve()
-                    if p.exists() and p not in seen:
+                    if p.exists() and p not in seen and p.name not in INTERNAL_FILES:
                         seen.add(p)
                         outputs.append(p)
             except Exception:
@@ -282,10 +311,11 @@ def _find_recipe_outputs(stem: str, *target_dirs: Path) -> list[Path]:
     for d in target_dirs:
         if d.exists():
             for f in sorted(d.rglob("*")):
-                if f.is_file() and not f.name.startswith("."):
+                if f.is_file() and not f.name.startswith(".") and f.name not in INTERNAL_FILES:
                     res_f = f.resolve()
                     if res_f not in seen:
-                        if f.stem == stem or f.stem.startswith(f"{stem}_") or f.name.startswith(f"{stem}."):
+                        # Exact match only! Never match prefix stem_
+                        if f.stem == stem:
                             seen.add(res_f)
                             outputs.append(res_f)
     return outputs
@@ -486,6 +516,16 @@ def build_recipes(
         ensure_output_marker(ctx.assets)
         ensure_output_marker(ctx.preview)
 
+        # Validate recipe names against reserved keywords and device names
+        valid_todo = []
+        for p in todo:
+            try:
+                validate_name(p.stem, "recipe name")
+                valid_todo.append(p)
+            except ValueError as e:
+                errors.append({"recipe": p.stem, "error": str(e), "traceback": ""})
+        todo = valid_todo
+
         for p in todo:
             manifest.load()
             old_files = manifest.remove_recipe(p.stem)
@@ -498,8 +538,8 @@ def build_recipes(
                         pass
             manifest.save()
 
-            _clean_recipe_output(p.stem, ctx.assets)
-            _clean_recipe_output(p.stem, ctx.preview)
+            _clean_recipe_output(p.stem, ctx.assets, manifest=manifest)
+            _clean_recipe_output(p.stem, ctx.preview, manifest=manifest)
 
             pixelkit.reset_build_stats()
             pixelkit.set_current_recipe(p.stem, output_dir=out)
