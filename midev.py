@@ -43,7 +43,7 @@ def get_venv_python() -> Path:
 
 def ensure_venv_execution():
     """If running under system Python, automatically re-spawn inside tools/.venv."""
-    if os.environ.get("MIDEV_NO_VENV_BOOTSTRAP"):
+    if os.environ.get("MIDEV_NO_VENV_BOOTSTRAP") or os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"):
         return
 
     # If already running inside tools/.venv or any active venv, continue
@@ -55,6 +55,14 @@ def ensure_venv_execution():
 
     if hasattr(sys, "real_prefix") or (hasattr(sys, "base_prefix") and sys.base_prefix != sys.prefix):
         return
+
+    # If external dependencies are already installed in the current environment, no need to bootstrap
+    try:
+        import PIL  # noqa: F401
+        import resvg_py  # noqa: F401
+        return
+    except ImportError:
+        pass
 
     venv_py = get_venv_python()
 

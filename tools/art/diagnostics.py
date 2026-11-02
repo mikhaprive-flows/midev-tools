@@ -4,6 +4,7 @@ Supports multi-project workspace verification and generator checks.
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -39,9 +40,22 @@ def run_doctor(as_json: bool = False) -> int:
     py_ok = sys.version_info >= (3, 12)
     check("Python Runtime", py_ok, f"{py_ver} ({sys.executable})")
 
-    # 2. Virtual environment
+    # 2. Virtual environment / Environment isolation
     venv_py = get_venv_python(ROOT_DIR)
-    check("Virtual Environment", venv_py.exists(), f"{venv_py}")
+    is_ci = bool(os.environ.get("CI") or os.environ.get("GITHUB_ACTIONS"))
+    is_in_venv = sys.prefix != getattr(sys, "base_prefix", sys.prefix)
+    has_local_venv = venv_py.exists()
+
+    env_ok = is_ci or is_in_venv or has_local_venv
+    if has_local_venv:
+        env_details = f"{venv_py} (local project venv)"
+    elif is_in_venv:
+        env_details = f"{sys.prefix} (active virtualenv)"
+    elif is_ci:
+        env_details = f"{sys.prefix} (CI runner environment)"
+    else:
+        env_details = "No virtual environment detected (run python midev.py setup)"
+    check("Virtual Environment", env_ok, env_details)
 
     # 3. Pillow library
     try:

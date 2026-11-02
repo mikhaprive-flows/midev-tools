@@ -1,0 +1,22 @@
+# Normalize line endings to LF across all platforms
+* text=auto eol=lf
+
+# Explicit text files
+*.py text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.js text eol=lf
+*.html text eol=lf
+*.css text eol=lf
+*.txt text eol=lf
+*.gpl text eol=lf
+*.hex text eol=lf
+*.fnt text eol=lf
+
+# Binary files
+*.png binary
+*.gif binary
+*.ico binary

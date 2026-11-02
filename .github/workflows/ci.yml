@@ -29,6 +29,11 @@ jobs:
   test:
     name: Test (${{ matrix.os }} - Py ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
+    env:
+      CI: "true"
+      MIDEV_NO_VENV_BOOTSTRAP: "1"
+      PYTHONIOENCODING: "utf-8"
+      PYTHONUTF8: "1"
     strategy:
       fail-fast: false
       matrix:
