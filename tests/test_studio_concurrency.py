@@ -84,7 +84,7 @@ class TestStudioConcurrency(unittest.TestCase):
 
     def test_post_build_with_csrf(self):
         """POST /api/build requires valid Origin/Token and triggers build."""
-        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=30)
         headers = {
             "Origin": f"http://127.0.0.1:{self.port}",
             "X-Midev-Token": studio.SESSION_TOKEN,

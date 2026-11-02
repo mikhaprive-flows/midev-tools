@@ -109,21 +109,40 @@ class StudioHandler(BaseHTTPRequestHandler):
         host = self.headers.get("Host", "").strip()
         if not host:
             return False
-        host_name = host.split(":")[0].lower().strip("[]")
-        return host_name in ("127.0.0.1", "localhost", "::1")
+        server_port = getattr(self.server, "server_port", None)
+        parts = host.split(":")
+        host_name = parts[0].lower().strip("[]")
+        if host_name not in ("127.0.0.1", "localhost", "::1"):
+            return False
+        if len(parts) > 1 and server_port is not None:
+            try:
+                port = int(parts[1])
+                if port != server_port:
+                    return False
+            except ValueError:
+                return False
+        return True
 
     def _is_valid_post(self) -> bool:
-        origin = self.headers.get("Origin")
-        if origin:
-            parsed_origin = urlparse(origin)
-            origin_host = (parsed_origin.hostname or "").lower().strip("[]")
-            if origin_host not in ("127.0.0.1", "localhost", "::1"):
-                return False
-
-        token = self.headers.get("X-Midev-Token")
-        if token and token != SESSION_TOKEN:
+        token = self.headers.get("X-Midev-Token", "").strip()
+        if not token or not secrets.compare_digest(token, SESSION_TOKEN):
             return False
-
+        origin = self.headers.get("Origin")
+        if origin is not None:
+            server_port = getattr(self.server, "server_port", None)
+            if server_port is not None:
+                allowed = {
+                    f"http://127.0.0.1:{server_port}",
+                    f"http://localhost:{server_port}",
+                    f"http://[::1]:{server_port}",
+                }
+                if origin.rstrip("/") not in allowed:
+                    return False
+            else:
+                parsed_origin = urlparse(origin)
+                origin_host = (parsed_origin.hostname or "").lower().strip("[]")
+                if origin_host not in ("127.0.0.1", "localhost", "::1"):
+                    return False
         return True
 
     def do_HEAD(self):
@@ -532,6 +551,13 @@ class StudioHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(len(data)))
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
+        if content_type.startswith("text/html"):
+            self.send_header(
+                "Content-Security-Policy",
+                "default-src 'self'; img-src 'self' data:; connect-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'",
+            )
         self.end_headers()
         if not head_only:
             self.wfile.write(data)
@@ -541,6 +567,8 @@ class StudioHandler(BaseHTTPRequestHandler):
         self.send_response(HTTPStatus.OK)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "DENY")
         self.end_headers()
         if not head_only:
             self.wfile.write(data)
