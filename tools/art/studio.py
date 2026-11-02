@@ -493,12 +493,26 @@ class StudioHandler(BaseHTTPRequestHandler):
 
         img_url = f"/assets/{rel_png}" if png_file.exists() else ""
 
+        exports = []
+        if png_file.exists():
+            exports.append({"label": "PNG SpriteSheet", "href": f"/assets/{rel_png}"})
+        godot_tres = out_dir / cat / f"{name}.tres"
+        if godot_tres.exists():
+            exports.append({"label": "Godot 4 .tres", "href": f"/assets/{cat}/{name}.tres"})
+        tp_json = out_dir / cat / f"{name}_tp.json"
+        if tp_json.exists():
+            exports.append({"label": "TexturePacker JSON", "href": f"/assets/{cat}/{name}_tp.json"})
+        native_json = out_dir / cat / f"{name}.json"
+        if native_json.exists():
+            exports.append({"label": "Native JSON", "href": f"/assets/{cat}/{name}.json"})
+
         self.send_json({
             "id": f"{rel_png[:-4]}",
             "name": name,
             "recipe": recipe_name,
             "meta": meta_data,
             "imageUrl": img_url,
+            "exports": exports,
         }, head_only=head_only)
 
     def serve_file(self, file_path: Path, content_type: str, head_only: bool = False):

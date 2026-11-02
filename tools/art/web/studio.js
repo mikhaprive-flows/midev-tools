@@ -143,12 +143,7 @@
       // Update export download links securely via DOM
       const linksContainer = document.getElementById("exportLinks");
       linksContainer.textContent = "";
-      const exportItems = [
-        { label: "PNG SpriteSheet", href: data.imageUrl },
-        { label: "Godot 4 .tres", href: `/assets/${encodeURIComponent(data.id)}.tres` },
-        { label: "TexturePacker JSON", href: `/assets/${encodeURIComponent(data.id)}_tp.json` },
-        { label: "Native JSON", href: `/assets/${encodeURIComponent(data.id)}.json` },
-      ];
+      const exportItems = data.exports || (data.imageUrl ? [{ label: "PNG SpriteSheet", href: data.imageUrl }] : []);
       exportItems.forEach((item) => {
         if (!item.href) return;
         const a = document.createElement("a");
@@ -159,7 +154,7 @@
         const spanLabel = document.createElement("span");
         spanLabel.textContent = item.label;
         const spanArrow = document.createElement("span");
-        spanArrow.textContent = "↗";
+        spanArrow.textContent = " ↗";
 
         a.appendChild(spanLabel);
         a.appendChild(spanArrow);

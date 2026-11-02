@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from version import __version__
+
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 
@@ -37,7 +39,7 @@ def read_local_state() -> dict[str, Any]:
 @dataclass
 class MidevConfig:
     name: str = "midev-art-project"
-    version: str = "1.1.0"
+    version: str = __version__
     active_project: str = "samples/fisharium"
     recipes_dir: Path = field(default_factory=lambda: ROOT_DIR / "samples" / "fisharium" / "recipes")
     output_dir: Path = field(default_factory=lambda: ROOT_DIR / "export" / "samples" / "fisharium" / "assets")

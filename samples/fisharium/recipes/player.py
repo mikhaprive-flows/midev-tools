@@ -17,7 +17,7 @@ Origin (16, 28) = feet center.
 from __future__ import annotations
 
 import math
-from artkit import Canvas, Sheet, save_sheet, save_preview_gif
+from pixelkit import Canvas, SheetBuilder
 
 W, H = 32, 32
 
@@ -438,7 +438,7 @@ RUN = [
 
 
 def build(ctx=None) -> None:
-    s = Sheet(W, H, origin=(16, 28))
+    s = SheetBuilder("player", W, H, origin=(16, 28))
     preview: dict[str, list[Canvas]] = {}
 
     for facing in ("down", "up", "side"):
@@ -454,14 +454,14 @@ def build(ctx=None) -> None:
             figure(facing, dy=0, tail=4, blink=True),
             figure(facing, dy=0, tail=5),
         ]
-        s.add_anim(f"idle_{facing}", idle, fps=5, loop=True)
+        s.add(f"idle_{facing}", idle, fps=5, loop=True)
 
         # WALK (8 @ 10fps)
         walk = [
             figure(facing, leg, arm, dy, hat_dy=hd, hair_dy=hrd, lift=lf, tail=i, flow=1)
             for i, (leg, arm, dy, hd, hrd, lf) in enumerate(WALK)
         ]
-        s.add_anim(f"walk_{facing}", walk, fps=10, loop=True)
+        s.add(f"walk_{facing}", walk, fps=10, loop=True)
 
         # RUN (8 @ 14fps): deeper stride + forward lean + streaming scarf + dust puffs
         run = [
@@ -471,7 +471,7 @@ def build(ctx=None) -> None:
             )
             for i, (leg, arm, dy, hd, hrd, lf) in enumerate(RUN)
         ]
-        s.add_anim(f"run_{facing}", run, fps=14, loop=True)
+        s.add(f"run_{facing}", run, fps=14, loop=True)
 
         # DASH (4 @ 18fps, one-shot): crouch -> burst w/ twin ghosts -> glide -> recover
         gvec = (-1, 0) if facing == "side" else ((0, -1) if facing == "down" else (0, 1))
@@ -488,7 +488,7 @@ def build(ctx=None) -> None:
             ),
             figure(facing, leg=1, arm=0, dy=1, hat_dy=1, tail=6, flow=1),
         ]
-        s.add_anim(f"dash_{facing}", dash, fps=18, loop=False)
+        s.add(f"dash_{facing}", dash, fps=18, loop=False)
 
         # INTERACT (5 @ 10fps, one-shot): reach out & grab/open
         interact = [
@@ -498,7 +498,7 @@ def build(ctx=None) -> None:
             figure(facing, dy=0, reach=2, tail=3),
             figure(facing, dy=0, reach=0, tail=4),
         ]
-        s.add_anim(f"interact_{facing}", interact, fps=10, loop=False)
+        s.add(f"interact_{facing}", interact, fps=10, loop=False)
 
         # DIG (6 @ 10fps, one-shot): wind-up -> swing -> strike -> pry -> toss dirt -> recover (Tier 1 Base)
         dig_dy = [-1, 0, 2, 2, 0, 0]
@@ -511,7 +511,7 @@ def build(ctx=None) -> None:
             )
             for i in range(6)
         ]
-        s.add_anim(f"dig_{facing}", dig, fps=10, loop=False)
+        s.add(f"dig_{facing}", dig, fps=10, loop=False)
 
         if facing == "side":
             preview = {"idle": idle, "walk": walk, "run": run, "dash": dash, "dig": dig}
@@ -531,7 +531,7 @@ def build(ctx=None) -> None:
             for sx, sy in ((4, 6 - (i % 2)), (27, 5 + (i % 2)), (6, 14), (25, 13)):
                 f.px(sx, sy, "gold_light" if (sx + i) % 2 == 0 else "white")
         celeb.append(f)
-    s.add_anim("celebrate_down", celeb, fps=10, loop=False)
+    s.add("celebrate_down", celeb, fps=10, loop=False)
 
     # ADDITIVE TIER DIG ANIMATIONS (M5-A4 Promotion)
     dig_dy = [-1, 0, 2, 2, 0, 0]
@@ -547,11 +547,16 @@ def build(ctx=None) -> None:
                 )
                 for i in range(6)
             ]
-            s.add_anim(f"{tier_prefix}_{facing}", tier_anim, fps=10, loop=False)
+            s.add(f"{tier_prefix}_{facing}", tier_anim, fps=10, loop=False)
 
-    save_sheet("sprites/player", s)
-    for k, frames in preview.items():
-        save_preview_gif(f"player_{k}.gif", frames, fps=10)
+    if ctx and hasattr(ctx, "sprites"):
+        s.save(ctx.sprites)
+        s.preview_gif(ctx.preview)
+    else:
+        from config import MidevConfig
+        cfg = MidevConfig.load()
+        s.save(cfg.output_dir / "sprites")
+        s.preview_gif(cfg.previews_dir)
 
 
 if __name__ == "__main__":

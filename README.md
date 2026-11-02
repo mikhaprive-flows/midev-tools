@@ -1,7 +1,7 @@
 # midev-tools: Code-Generated Game Art Asset Toolkit
 
 [![Python 3.12+](https://img.shields.io/badge/Python-3.12%2B-blue?style=flat-square&logo=python&logoColor=white)](https://python.org)
-[![Tests Passing](https://img.shields.io/badge/Tests-Passing-brightgreen?style=flat-square&logo=githubactions&logoColor=white)](tests/)
+[![CI](https://github.com/mikhaprive-flows/midev-tools/actions/workflows/ci.yml/badge.svg)](https://github.com/mikhaprive-flows/midev-tools/actions/workflows/ci.yml)
 [![Status](https://img.shields.io/badge/Status-In%20Active%20Development-yellow?style=flat-square)](#)
 [![MCP Server](https://img.shields.io/badge/MCP-JSON--RPC%202.0-8A2BE2?style=flat-square)](tools/art/mcp_server.py)
 [![Ko-fi Support](https://img.shields.io/badge/Ko--fi-Support%20Developer-FF5E5B?style=flat-square&logo=ko-fi&logoColor=white)](https://ko-fi.com/midevfish)
@@ -245,6 +245,14 @@ midev_art_tools/
 │   └── images/               # Documentation screenshots & showcase animations
 └── README.md                 # Project documentation
 ```
+
+---
+
+## 🔒 Security Model
+
+- **Arbitrary Python Execution**: Recipes (`recipes/*.py`) are Python scripts dynamically executed by the build engine. Only load, inspect, and build projects from trusted sources. Never build untrusted third-party recipes.
+- **MCP Server Boundaries**: The Model Context Protocol (MCP) server exposes tools to local AI agents via stdio. All asset outputs, template generations, and validations are restricted to project workspaces and the `export/` directory. Target directories outside the repository tree require explicit confirmation.
+- **Studio Web Server Protection**: The local Studio server runs strictly on `localhost`/`127.0.0.1` and implements session token verification (`X-Midev-Token`), Host header validation (preventing DNS rebinding), strict Origin/CORS validation (preventing CSRF), and path traversal containment.
 
 ---
 

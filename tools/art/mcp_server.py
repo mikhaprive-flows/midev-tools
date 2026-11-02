@@ -24,6 +24,7 @@ import inspect_tool
 import projects
 from config import MidevConfig
 from safepath import is_within, validate_name
+from version import __version__
 
 SUPPORTED_PROTOCOL_VERSIONS = ("2024-11-05", "2024-10-07")
 
@@ -160,7 +161,7 @@ class MCPServer:
                 },
                 "serverInfo": {
                     "name": "midev-art-mcp",
-                    "version": "1.0.0",
+                    "version": __version__,
                 },
             },
         )

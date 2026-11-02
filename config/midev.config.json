@@ -1,6 +1,6 @@
 {
   "name": "midev-art-studio",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "active_project": "samples/fisharium",
   "paths": {
     "projects": "projects",

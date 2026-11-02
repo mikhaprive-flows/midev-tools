@@ -31,7 +31,7 @@ from generators import (
     UIKitGenerator,
     VFXGenerator,
 )
-from pixelkit import PAL, ROOT
+from pixelkit import ROOT
 from safepath import assert_safe_output_dir, is_within, safe_clean_output_dir, validate_name
 from watcher import RecipeWatcher
 from PIL import Image
@@ -123,9 +123,25 @@ class Ctx:
 
 # Dynamic recipe loader
 def load(path: Path):
-    if str(path.parent) not in sys.path:
-        sys.path.insert(0, str(path.parent))
+    parent_str = str(path.parent.resolve())
+    if parent_str not in sys.path:
+        sys.path.insert(0, parent_str)
+
+    # Invalidate cached local helper modules inside path.parent to enable hot-reloading
+    parent_path = path.parent.resolve()
+    for mod_name, mod_obj in list(sys.modules.items()):
+        if mod_obj and getattr(mod_obj, "__file__", None):
+            try:
+                mod_file = Path(mod_obj.__file__).resolve()
+                if is_within(mod_file, parent_path):
+                    del sys.modules[mod_name]
+            except Exception:
+                pass
+
     name = f"art_recipe_{path.stem}"
+    if name in sys.modules:
+        del sys.modules[name]
+
     spec = importlib.util.spec_from_file_location(name, path)
     if spec is None or spec.loader is None:
         raise ImportError(f"Cannot load recipe at {path}")
@@ -141,40 +157,8 @@ def recipes() -> list[Path]:
     return sorted(p for p in RECIPES.glob("*.py") if not p.name.startswith("_"))
 
 
-def save_sheet(name: str, sheet: Any):
-    parts = name.split("/")
-    sheet_name = parts[-1]
-    sub_dir = CURRENT_OUT_DIR / "/".join(parts[:-1]) if len(parts) > 1 else CURRENT_OUT_DIR
-    sub_dir.mkdir(parents=True, exist_ok=True)
-
-    sb = pixelkit.SheetBuilder(sheet_name, sheet.fw, sheet.fh, sheet.origin)
-    for anim_name, frames, fps, loop in sheet.anims:
-        sb.add(anim_name, frames, fps=fps, loop=loop)
-    return sb.save(sub_dir)
-
-
-def save_preview_gif(name: str, frames: list[Any], fps: int = 10):
-    CURRENT_PREVIEW_DIR.mkdir(parents=True, exist_ok=True)
-    out = CURRENT_PREVIEW_DIR / name
-    raw = [f.img if hasattr(f, "img") else f for f in frames]
-    duration = int(1000 / fps)
-    raw[0].save(out, save_all=True, append_images=raw[1:], duration=duration, loop=0, disposal=2)
-    return out
-
-
-# Canvas & Sheet aliases
+# Canvas alias
 Canvas = pixelkit.Canvas
-
-
-class Sheet:
-    def __init__(self, fw: int, fh: int, origin: tuple[int, int] = (0, 0)):
-        self.fw = fw
-        self.fh = fh
-        self.origin = origin
-        self.anims: list[tuple[str, list[Any], int, bool]] = []
-
-    def add_anim(self, name: str, frames: list[Any], fps: int = 10, loop: bool = True):
-        self.anims.append((name, frames, fps, loop))
 
 
 # CLI commands
@@ -286,7 +270,6 @@ def _find_recipe_outputs(stem: str, *target_dirs: Path) -> list[Path]:
 
 def validate_assets(target_dir: Path | None = None) -> ValidationResult:
     """Validate output PNG assets against active palette, alpha, and geometry rules."""
-    from pixelkit import PAL
     out = target_dir or CURRENT_OUT_DIR
     if not out.exists():
         return ValidationResult(
@@ -297,12 +280,13 @@ def validate_assets(target_dir: Path | None = None) -> ValidationResult:
         )
 
     bad = 0
-    pal = PAL
+    pal = pixelkit.PAL
     results = []
     for png in sorted(out.rglob("*.png")):
         rel = png.relative_to(out)
         try:
-            im = Image.open(png)
+            with Image.open(png) as raw_im:
+                im = raw_im.copy()
         except Exception as e:
             results.append({
                 "asset": rel.as_posix(),
@@ -321,7 +305,8 @@ def validate_assets(target_dir: Path | None = None) -> ValidationResult:
 
         if CONFIG.binary_alpha:
             try:
-                alpha = im.getchannel("A")
+                rgba_im = im.convert("RGBA")
+                alpha = rgba_im.getchannel("A")
                 if any(0 < a < 255 for a in alpha.tobytes()):
                     errs.append("semi-transparent px (alpha must be 0/255)")
             except Exception:
