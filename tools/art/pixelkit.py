@@ -281,11 +281,12 @@ class SheetBuilder:
     """Packs animations into a grid: one row per animation, frames left->right.
     Writes <name>.png + <name>.json (format documented in docs/ART_PIPELINE.md)."""
 
-    def __init__(self, name: str, fw: int, fh: int, origin: tuple[int, int] | None = None):
+    def __init__(self, name: str, fw: int, fh: int, origin: tuple[int, int] | None = None, extrude: int = 0):
         from safepath import validate_name
         self.name = validate_name(name, "sheet name")
         self.fw, self.fh = fw, fh
         self.origin = origin or (fw // 2, fh - 2)  # feet position, used by the game for y-sorting
+        self.extrude = max(0, int(extrude))
         self.anims: list[tuple[str, list[Image.Image], float, bool]] = []
         self.snapped_pixels: int = 0
         self.binarized_alpha: int = 0
@@ -317,16 +318,56 @@ class SheetBuilder:
         self.anims.append((anim, fr, fps, loop))
         return self
 
-    def save(self, out_dir: Path, formats: Sequence[str] | None = None) -> Path:
+    def save(self, out_dir: Path, formats: Sequence[str] | None = None, extrude: int | None = None) -> Path:
         if not self.anims:
             raise ValueError(f"Cannot save SheetBuilder '{self.name}': no animations added")
         out_dir = Path(out_dir).resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
+        ext_val = max(0, int(extrude if extrude is not None else self.extrude))
         cols = max(len(a[1]) for a in self.anims)
-        sheet = Image.new("RGBA", (cols * self.fw, len(self.anims) * self.fh), (0, 0, 0, 0))
-        for row, (anim, frames, fps, loop) in enumerate(self.anims):
-            for i, f in enumerate(frames):
-                sheet.paste(f, (i * self.fw, row * self.fh))
+        rows = len(self.anims)
+
+        if ext_val > 0:
+            cell_w = self.fw + 2 * ext_val
+            cell_h = self.fh + 2 * ext_val
+            sheet = Image.new("RGBA", (cols * cell_w, rows * cell_h), (0, 0, 0, 0))
+            for row, (anim, frames, fps, loop) in enumerate(self.anims):
+                for i, f in enumerate(frames):
+                    cx = i * cell_w + ext_val
+                    cy = row * cell_h + ext_val
+                    sheet.paste(f, (cx, cy))
+
+                    # 1px border extrusion to eliminate GPU texture filtering bleed
+                    top_strip = f.crop((0, 0, self.fw, 1))
+                    for e in range(1, ext_val + 1):
+                        sheet.paste(top_strip, (cx, cy - e))
+                    bot_strip = f.crop((0, self.fh - 1, self.fw, self.fh))
+                    for e in range(1, ext_val + 1):
+                        sheet.paste(bot_strip, (cx, cy + self.fh - 1 + e))
+                    left_strip = f.crop((0, 0, 1, self.fh))
+                    for e in range(1, ext_val + 1):
+                        sheet.paste(left_strip, (cx - e, cy))
+                    right_strip = f.crop((self.fw - 1, 0, self.fw, self.fh))
+                    for e in range(1, ext_val + 1):
+                        sheet.paste(right_strip, (cx + self.fw - 1 + e, cy))
+
+                    c_tl = f.getpixel((0, 0))
+                    c_tr = f.getpixel((self.fw - 1, 0))
+                    c_bl = f.getpixel((0, self.fh - 1))
+                    c_br = f.getpixel((self.fw - 1, self.fh - 1))
+                    for ex in range(1, ext_val + 1):
+                        for ey in range(1, ext_val + 1):
+                            sheet.putpixel((cx - ex, cy - ey), c_tl)
+                            sheet.putpixel((cx + self.fw - 1 + ex, cy - ey), c_tr)
+                            sheet.putpixel((cx - ex, cy + self.fh - 1 + ey), c_bl)
+                            sheet.putpixel((cx + self.fw - 1 + ex, cy + self.fh - 1 + ey), c_br)
+            self.extra_meta["extrude"] = ext_val
+        else:
+            sheet = Image.new("RGBA", (cols * self.fw, rows * self.fh), (0, 0, 0, 0))
+            for row, (anim, frames, fps, loop) in enumerate(self.anims):
+                for i, f in enumerate(frames):
+                    sheet.paste(f, (i * self.fw, row * self.fh))
+
         png = out_dir / f"{self.name}.png"
         sheet.save(png)
 

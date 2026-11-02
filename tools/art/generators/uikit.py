@@ -149,8 +149,39 @@ class UIKitGenerator:
         c.outline()
         return c
 
+    def generate_panel_sheet(
+        self,
+        sheet_name: str = "hud_panel",
+        width: int = 48,
+        height: int = 48,
+        border_size: int = 6,
+        style: str = "gold",
+    ) -> SheetBuilder:
+        """Generate a 9-slice panel sheet with sidecar margins metadata for NinePatchRect and StyleBoxTexture."""
+        sb = SheetBuilder(sheet_name, width, height, origin=(width // 2, height // 2))
+        panel = self.generate_9slice_panel(width, height, border_size=border_size, style=style)
+        sb.add("panel", [panel], fps=1, loop=False)
+        sb.extra_meta = {
+            "type": "nine_slice",
+            "frame_width": width,
+            "frame_height": height,
+            "margins": {
+                "left": border_size,
+                "top": border_size,
+                "right": border_size,
+                "bottom": border_size,
+            },
+        }
+        return sb
+
     def generate_sheet(self, sheet_name: str = "hud_kit") -> SheetBuilder:
         sb = SheetBuilder(sheet_name, 48, 48, origin=(24, 24))
+        sb.extra_meta = {
+            "type": "nine_slice",
+            "frame_width": 48,
+            "frame_height": 48,
+            "margins": {"left": 4, "top": 4, "right": 4, "bottom": 4},
+        }
 
         panels = [
             self.generate_9slice_panel(48, 48, border_size=4, style="gold"),

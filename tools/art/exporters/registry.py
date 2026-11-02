@@ -8,9 +8,11 @@ from typing import Sequence
 
 from .base import BaseExporter, SheetInfo
 from .godot import GodotExporter
+from .godot_tileset import GodotTileSetExporter
 from .native import NativeExporter
 from .slices import SlicesExporter
 from .texturepacker import TexturePackerExporter
+from .tiled import TiledExporter
 
 try:
     from log import log
@@ -22,10 +24,14 @@ except ImportError:
 EXPORTERS: dict[str, BaseExporter] = {
     "native": NativeExporter(),
     "godot": GodotExporter(),
+    "godot_tileset": GodotTileSetExporter(),
+    "tileset": GodotTileSetExporter(),
     "texturepacker": TexturePackerExporter(),
     "tp": TexturePackerExporter(),
     "slices": SlicesExporter(),
     "frames": SlicesExporter(),
+    "tiled": TiledExporter(),
+    "tsx": TiledExporter(),
 }
 
 
@@ -34,7 +40,7 @@ def get_exporter(name: str) -> BaseExporter | None:
 
 
 def list_available_exporters() -> list[str]:
-    return ["native", "godot", "texturepacker", "slices"]
+    return ["native", "godot", "godot_tileset", "texturepacker", "slices", "tiled"]
 
 
 def run_exporters(info: SheetInfo, out_dir: Path, formats: Sequence[str] | None = None) -> list[Path]:

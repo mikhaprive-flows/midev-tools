@@ -17,17 +17,18 @@ class GodotExporter(BaseExporter):
         out_dir.mkdir(parents=True, exist_ok=True)
         tres_path = out_dir / f"{info.name}.tres"
 
-        # Validate unique animation names per sheet
-        seen_anims: set[str] = set()
-        for anim in info.anims:
-            if anim.name in seen_anims:
-                raise ValueError(f"Duplicate animation name '{anim.name}' in sheet '{info.name}'")
-            seen_anims.add(anim.name)
-
-        # Calculate total frames for load_steps
-        total_frames = sum(len(a.frames) for a in info.anims)
-        # load_steps: ext_resource (1) + root resource (1) + each sub_resource (total_frames)
-        load_steps = 2 + total_frames
+        # 1. Autotile 47 Blob -> Godot 4 TileSet resource
+        if info.extra_meta.get("type") == "autotile_blob47":
+            from .godot_tileset import GodotTileSetExporter
+            ts_exp = GodotTileSetExporter()
+            res_files = ts_exp.export(info, out_dir)
+            primary_tres = out_dir / f"{info.name}.tres"
+            if res_files and res_files[0] != primary_tres:
+                import shutil
+                shutil.copy2(str(res_files[0]), str(primary_tres))
+                if primary_tres not in res_files:
+                    res_files.append(primary_tres)
+            return res_files
 
         image_filename = info.image_path.name
         # Godot res path prefix support
@@ -42,6 +43,47 @@ class GodotExporter(BaseExporter):
         else:
             tex_res_path = f"res://{image_filename}"
 
+        # 2. Nine-Slice UI Panel -> Godot 4 StyleBoxTexture resource
+        if info.extra_meta.get("type") == "nine_slice":
+            margins = info.extra_meta.get("margins", {})
+            ml = float(margins.get("left", 0))
+            mt = float(margins.get("top", 0))
+            mr = float(margins.get("right", 0))
+            mb = float(margins.get("bottom", 0))
+
+            lines = [
+                '[gd_resource type="StyleBoxTexture" load_steps=2 format=3]',
+                "",
+                f'[ext_resource type="Texture2D" path="{tex_res_path}" id="1_tex"]',
+                "",
+                "[resource]",
+                'texture = ExtResource("1_tex")',
+                f"texture_margin_left = {ml}",
+                f"texture_margin_top = {mt}",
+                f"texture_margin_right = {mr}",
+                f"texture_margin_bottom = {mb}",
+                "",
+            ]
+            tres_path.write_text("\n".join(lines), encoding="utf-8")
+            return [tres_path]
+
+        # 3. Standard Animation SpriteFrames resource
+        # Validate unique animation names per sheet
+        seen_anims: set[str] = set()
+        for anim in info.anims:
+            if anim.name in seen_anims:
+                raise ValueError(f"Duplicate animation name '{anim.name}' in sheet '{info.name}'")
+            seen_anims.add(anim.name)
+
+        # Calculate total frames for load_steps
+        total_frames = sum(len(a.frames) for a in info.anims)
+        # load_steps: ext_resource (1) + root resource (1) + each sub_resource (total_frames)
+        load_steps = 2 + total_frames
+
+        extrude = int(info.extra_meta.get("extrude", 0))
+        step_w = info.fw + 2 * extrude
+        step_h = info.fh + 2 * extrude
+
         lines = [
             f'[gd_resource type="SpriteFrames" load_steps={load_steps} format=3]',
             "",
@@ -54,8 +96,8 @@ class GodotExporter(BaseExporter):
         sub_counter = 1
         for anim in info.anims:
             for idx in range(len(anim.frames)):
-                x = idx * info.fw
-                y = anim.row * info.fh
+                x = idx * step_w + extrude
+                y = anim.row * step_h + extrude
                 sub_id = f"AtlasTexture_{sub_counter}"
                 sub_res_map[(anim.name, idx)] = sub_id
                 sub_counter += 1
