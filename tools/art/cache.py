@@ -8,6 +8,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -25,14 +27,26 @@ class BuildCache:
     def _load(self):
         if self.cache_file.exists():
             try:
-                raw = json.loads(self.cache_file.read_text(encoding="utf-8"))
+                content = self.cache_file.read_text(encoding="utf-8")
+                if not content.strip():
+                    raise json.JSONDecodeError("Empty cache file", content, 0)
+                raw = json.loads(content)
                 if isinstance(raw, dict):
                     for k, v in raw.items():
                         if isinstance(v, dict):
                             self.entries[k] = v
                         elif isinstance(v, str):
                             self.entries[k] = {"key": v, "files": []}
+                else:
+                    raise TypeError("Cache file root must be an object")
             except Exception:
+                corrupt_dest = self.cache_file.with_name(f"{self.cache_file.name}.corrupt")
+                try:
+                    if corrupt_dest.exists():
+                        corrupt_dest = self.cache_file.with_name(f"{self.cache_file.name}.corrupt.{int(time.time())}")
+                    shutil.move(str(self.cache_file), str(corrupt_dest))
+                except Exception:
+                    pass
                 self.entries = {}
 
     def _get_framework_hash(self) -> str:
@@ -150,7 +164,16 @@ class BuildCache:
             with file_lock(lock_file):
                 tmp_file = self.cache_file.with_suffix(".tmp")
                 tmp_file.write_text(json.dumps(self.entries, indent=2), encoding="utf-8")
-                os.replace(tmp_file, self.cache_file)
+                replaced = False
+                for attempt in range(3):
+                    try:
+                        os.replace(tmp_file, self.cache_file)
+                        replaced = True
+                        break
+                    except OSError:
+                        time.sleep(0.05 * (attempt + 1))
+                if not replaced:
+                    os.replace(tmp_file, self.cache_file)
         except Exception as e:
             print(f"[cache] Warning: Failed to save build cache: {e}")
 

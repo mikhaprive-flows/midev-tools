@@ -10,6 +10,8 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import os
+import shutil
+import time
 from pathlib import Path
 from typing import Any
 
@@ -66,18 +68,93 @@ class Manifest:
 
     def load(self) -> None:
         if not self.path.exists():
-            self.entries = {}
+            if not self.entries:
+                self.entries = {}
             return
         lock_file = self.path.with_name(f"{self.path.name}.lock")
         try:
             with file_lock(lock_file):
-                raw = json.loads(self.path.read_text(encoding="utf-8"))
+                content = self.path.read_text(encoding="utf-8")
+                if not content.strip():
+                    raise json.JSONDecodeError("Empty manifest file", content, 0)
+                raw = json.loads(content)
+                if not isinstance(raw, dict):
+                    raise TypeError(f"Manifest root must be an object, got {type(raw).__name__}")
                 assets_data = raw.get("assets", {})
+                if not isinstance(assets_data, dict):
+                    raise TypeError(f"Manifest assets field must be an object, got {type(assets_data).__name__}")
                 self.entries = {
                     k: AssetEntry.from_dict(v) for k, v in assets_data.items()
                 }
-        except Exception:
-            pass
+        except (json.JSONDecodeError, KeyError, TypeError, OSError):
+            # Backup corrupt manifest to .corrupt file
+            corrupt_dest = self.path.with_name(f"{self.path.name}.corrupt")
+            try:
+                if corrupt_dest.exists():
+                    corrupt_dest = self.path.with_name(f"{self.path.name}.corrupt.{int(time.time())}")
+                shutil.move(str(self.path), str(corrupt_dest))
+            except Exception:
+                pass
+
+            # Reconstruct entries by scanning output directory
+            reconstructed = self._reconstruct_from_disk()
+            for k, v in reconstructed.items():
+                if k not in self.entries:
+                    self.entries[k] = v
+
+    def _reconstruct_from_disk(self) -> dict[str, AssetEntry]:
+        recovered: dict[str, AssetEntry] = {}
+        out_root = self.path.parent
+        for cat in ("sprites", "tiles", "ui", "backgrounds"):
+            cat_dir = out_root / cat
+            if not cat_dir.is_dir():
+                continue
+            for png in sorted(cat_dir.glob("*.png")):
+                if png.name.startswith("."):
+                    continue
+                sidecar = png.with_suffix(".json")
+                meta: dict[str, Any] = {}
+                if sidecar.exists():
+                    try:
+                        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+
+                asset_id = f"{cat}/{png.stem}"
+                rel_png = f"{cat}/{png.name}"
+                files = [rel_png]
+                if sidecar.exists():
+                    files.append(f"{cat}/{sidecar.name}")
+                tres = png.with_suffix(".tres")
+                if tres.exists():
+                    files.append(f"{cat}/{tres.name}")
+                tp = png.with_name(f"{png.stem}_tp.json")
+                if tp.exists():
+                    files.append(f"{cat}/{tp.name}")
+
+                fw = meta.get("frameWidth", 0)
+                fh = meta.get("frameHeight", 0)
+                ox = meta.get("originX", 0)
+                oy = meta.get("originY", 0)
+                anims = list(meta.get("animations", {}).keys())
+
+                f_hash = ""
+                try:
+                    f_hash = hashlib.sha256(png.read_bytes()).hexdigest()
+                except Exception:
+                    pass
+
+                recovered[asset_id] = AssetEntry(
+                    asset_id=asset_id,
+                    recipe=meta.get("name", png.stem),
+                    category=cat,
+                    files=files,
+                    frame_size=[fw, fh],
+                    origin=[ox, oy],
+                    anims=anims,
+                    hash=f_hash,
+                )
+        return recovered
 
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,16 +163,25 @@ class Manifest:
             "assets": {k: v.to_dict() for k, v in self.entries.items()},
         }
         lock_file = self.path.with_name(f"{self.path.name}.lock")
-        try:
-            with file_lock(lock_file):
-                tmp_file = self.path.with_suffix(".tmp")
-                tmp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
-                os.replace(tmp_file, self.path)
-        except Exception:
-            try:
-                self.path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-            except Exception:
-                pass
+        serialized = json.dumps(data, indent=2)
+        tmp_file = self.path.with_suffix(".tmp")
+        with file_lock(lock_file):
+            tmp_file.write_text(serialized, encoding="utf-8")
+            replaced = False
+            for attempt in range(3):
+                try:
+                    os.replace(tmp_file, self.path)
+                    replaced = True
+                    break
+                except OSError:
+                    time.sleep(0.05 * (attempt + 1))
+            if not replaced:
+                try:
+                    os.replace(tmp_file, self.path)
+                except OSError as e:
+                    import sys
+                    sys.stderr.write(f"[manifest] Warning: Failed atomic save to {self.path}: {e}\n")
+                    self.path.write_text(serialized, encoding="utf-8")
 
     def add_asset(self, entry: AssetEntry) -> None:
         self.entries[entry.asset_id] = entry
