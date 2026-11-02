@@ -55,6 +55,12 @@ Use the appropriate `ctx` destination folder:
 - HUD, dialogs, buttons, slots: `ctx.ui`
 - Parallax & scenic backdrops: `ctx.backgrounds`
 
+### Helper Modules & Shared Libraries
+Non-recipe utility files (math helpers, procedural generators, shared palette logic) inside `recipes/` must follow either convention:
+1. Prefixed with an underscore: `recipes/_math_utils.py`
+2. Placed in a `lib/` subfolder: `recipes/lib/math_utils.py`
+Any `.py` file lacking a top-level callable `def build(ctx)` will be treated as a helper and skipped from direct asset builds.
+
 ---
 
 ## 3. Autonomous Multimodal Verification Loop

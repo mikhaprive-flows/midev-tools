@@ -5,6 +5,7 @@ Supports multi-project workspaces, procedural generators, incremental cache, and
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -169,10 +170,37 @@ def load(path: Path):
     return mod
 
 
+def _is_recipe_file(p: Path) -> bool:
+    """Check via AST if a Python file defines a top-level callable build function."""
+    try:
+        content = p.read_text(encoding="utf-8")
+        tree = ast.parse(content, filename=str(p))
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "build":
+                return True
+    except Exception:
+        return False
+    return False
+
+
 def recipes() -> list[Path]:
     if not RECIPES.exists():
         return []
-    return sorted(p for p in RECIPES.glob("*.py") if not p.name.startswith("_"))
+    return sorted(p for p in RECIPES.glob("*.py") if not p.name.startswith("_") and _is_recipe_file(p))
+
+
+def helper_files() -> list[Path]:
+    if not RECIPES.exists():
+        return []
+    helpers: list[Path] = []
+    for p in sorted(RECIPES.glob("*.py")):
+        if p.name.startswith("_") or not _is_recipe_file(p):
+            helpers.append(p)
+    lib_dir = RECIPES / "lib"
+    if lib_dir.is_dir():
+        for p in sorted(lib_dir.rglob("*.py")):
+            helpers.append(p)
+    return helpers
 
 
 # Canvas alias
@@ -189,12 +217,15 @@ def __getattr__(name: str):
 def cmd_list(as_json: bool = False) -> int:
     active = projects.get_active_project()
     all_recipes = recipes()
+    helpers = helper_files()
     if as_json:
         payload = {
             "status": "ok",
             "project": active.to_dict(),
             "recipes": [p.stem for p in all_recipes],
+            "helpers": [p.stem for p in helpers],
             "total": len(all_recipes),
+            "total_helpers": len(helpers),
         }
         print(json.dumps(payload, indent=2))
         return 0
@@ -205,7 +236,11 @@ def cmd_list(as_json: bool = False) -> int:
         print("  (No recipes found. Create one with 'midev new <name>')")
     for p in all_recipes:
         print(f"  - {p.stem}")
-    print(f"\nTotal: {len(all_recipes)} recipe(s)\n")
+    if helpers:
+        print("\nHelpers & Utilities:")
+        for h in helpers:
+            print(f"  - {h.stem}")
+    print(f"\nTotal: {len(all_recipes)} recipe(s), {len(helpers)} helper(s)\n")
     return 0
 
 
@@ -545,6 +580,12 @@ def build_recipes(
             pixelkit.set_current_recipe(p.stem, output_dir=out)
             try:
                 mod = load(p)
+                if not hasattr(mod, "build") or not callable(getattr(mod, "build")):
+                    warnings.append({
+                        "recipe": p.stem,
+                        "warning": f"skipped (no build()): {p.stem}",
+                    })
+                    continue
                 mod.build(ctx)
                 recipe_outputs = _find_recipe_outputs(p.stem, ctx.assets, ctx.preview)
 

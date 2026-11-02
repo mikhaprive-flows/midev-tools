@@ -87,8 +87,22 @@ def run_doctor(as_json: bool = False) -> int:
     check("Multi-Project Engine", len(projs) > 0, f"{len(projs)} projects found (Active: {active.title})")
 
     # 9. Active Project Recipes
-    recs = [p for p in active.recipes_dir.glob("*.py") if not p.name.startswith("_")] if active.recipes_dir.exists() else []
-    check("Active Project Recipes", len(recs) > 0, f"{len(recs)} recipes in {active.recipes_dir}")
+    import ast
+
+    def _is_recipe(p: Path) -> bool:
+        try:
+            tree = ast.parse(p.read_text(encoding="utf-8"))
+            return any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "build" for n in tree.body)
+        except Exception:
+            return False
+
+    all_py = list(active.recipes_dir.glob("*.py")) if active.recipes_dir.exists() else []
+    recs = [p for p in all_py if not p.name.startswith("_") and _is_recipe(p)]
+    helpers = [p for p in all_py if p.name.startswith("_") or not _is_recipe(p)]
+    lib_dir = active.recipes_dir / "lib"
+    if lib_dir.is_dir():
+        helpers.extend(lib_dir.rglob("*.py"))
+    check("Active Project Recipes", len(recs) > 0, f"{len(recs)} recipes, {len(helpers)} helpers in {active.recipes_dir}")
 
     # 10. Engine Exporters
     exps = list_available_exporters()

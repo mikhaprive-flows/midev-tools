@@ -91,10 +91,29 @@ class BuildCache:
         if recipe_path.exists():
             h.update(recipe_path.read_bytes())
             try:
-                for helper in sorted(recipe_path.parent.glob("_*.py")):
+                import ast
+                for helper in sorted(recipe_path.parent.glob("*.py")):
                     if helper != recipe_path:
-                        h.update(helper.name.encode("utf-8"))
-                        h.update(helper.read_bytes())
+                        if helper.name.startswith("_"):
+                            h.update(helper.name.encode("utf-8"))
+                            h.update(helper.read_bytes())
+                        else:
+                            try:
+                                tree = ast.parse(helper.read_text(encoding="utf-8"))
+                                has_build = any(
+                                    isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == "build"
+                                    for n in tree.body
+                                )
+                                if not has_build:
+                                    h.update(helper.name.encode("utf-8"))
+                                    h.update(helper.read_bytes())
+                            except Exception:
+                                pass
+                lib_dir = recipe_path.parent / "lib"
+                if lib_dir.is_dir():
+                    for lib_f in sorted(lib_dir.rglob("*.py")):
+                        h.update(lib_f.name.encode("utf-8"))
+                        h.update(lib_f.read_bytes())
             except OSError:
                 pass
 
