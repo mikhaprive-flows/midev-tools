@@ -475,9 +475,10 @@ class MCPServer:
                 self.send_tool_error(req_id, "Missing required string argument 'project_id'")
                 return
             try:
-                switched = projects.set_active_project(pid)
-                self.cfg = MidevConfig.load()
-                artkit.apply_config(self.cfg)
+                with artkit.BUILD_LOCK:
+                    switched = projects.set_active_project(pid)
+                    self.cfg = MidevConfig.load()
+                    artkit.apply_config(self.cfg)
                 self.send_tool_result(req_id, {
                     "status": "ok",
                     "switchedTo": switched.to_dict(),

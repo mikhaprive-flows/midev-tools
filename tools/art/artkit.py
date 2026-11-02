@@ -1054,7 +1054,8 @@ def cmd_watch(recipe: str | None = None) -> int:
 
     def reload_config():
         nonlocal watcher
-        apply_config(MidevConfig.load())
+        with BUILD_LOCK:
+            apply_config(MidevConfig.load())
         if watcher:
             watcher.recipes_dir = RECIPES
             print(f"[watch] Config reloaded, active recipes dir: {RECIPES}")

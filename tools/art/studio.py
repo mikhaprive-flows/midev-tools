@@ -307,9 +307,10 @@ class StudioHandler(BaseHTTPRequestHandler):
                 project_id = query.get("project", [""])[0]
 
             try:
-                switched = projects.set_active_project(project_id)
-                cfg = MidevConfig.load()
-                artkit.apply_config(cfg)
+                with artkit.BUILD_LOCK:
+                    switched = projects.set_active_project(project_id)
+                    cfg = MidevConfig.load()
+                    artkit.apply_config(cfg)
                 print(f"[studio] Switched active project to: {switched.title} ({switched.id})")
                 broadcast_event({"type": "project_switched", "project": switched.id})
                 self.send_json({"status": "ok", "activeProject": switched.to_dict()})
@@ -349,9 +350,8 @@ class StudioHandler(BaseHTTPRequestHandler):
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")
 
     def handle_get_catalog(self, head_only: bool = False):
-        # Refresh config in case project changed
+        # Pure read-only catalog query without mutating global build state
         cfg = MidevConfig.load()
-        artkit.apply_config(cfg)
         out_dir = cfg.output_dir
 
         manifest_path = out_dir / "manifest.json"
