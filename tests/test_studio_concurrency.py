@@ -27,6 +27,12 @@ import studio
 class TestStudioConcurrency(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        import projects
+        cls._orig_project = projects.get_active_project_id()
+        projects.set_project_override("samples/fisharium")
+        cfg = MidevConfig.load()
+        artkit.apply_config(cfg)
+
         cls.server = HTTPServer(("127.0.0.1", 0), studio.StudioHandler)
         cls.port = cls.server.server_address[1]
         cls.thread = threading.Thread(target=cls.server.serve_forever, daemon=True)
@@ -37,6 +43,14 @@ class TestStudioConcurrency(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
+        import projects
+        projects.set_project_override(None)
+        if hasattr(cls, "_orig_project") and cls._orig_project:
+            try:
+                projects.set_active_project(cls._orig_project)
+            except Exception:
+                pass
+        artkit.apply_config(MidevConfig.load())
 
     def test_get_catalog_no_side_effects(self):
         """GET /api/catalog must not trigger builds on an empty/unbuilt project."""

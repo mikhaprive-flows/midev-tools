@@ -119,6 +119,7 @@ def main():
 
     elif first in ("test", "tests"):
         import unittest
+        from projects import read_active_state, write_active_state
         tests_dir = ROOT_DIR / "tests"
         if not tests_dir.exists():
             tests_dir.mkdir(parents=True, exist_ok=True)
@@ -133,8 +134,13 @@ def main():
             print(f"[midev] Running test suite via unittest discovery in {tests_dir}...")
             suite = loader.discover(str(tests_dir), pattern="test_*.py")
         runner = unittest.TextTestRunner(verbosity=2)
-        result = runner.run(suite)
-        return 0 if result.wasSuccessful() else 1
+
+        saved_active_state = dict(read_active_state())
+        try:
+            result = runner.run(suite)
+            return 0 if result.wasSuccessful() else 1
+        finally:
+            write_active_state(saved_active_state)
 
     elif first == "icon":
         from icon_gen import generate_studio_icon

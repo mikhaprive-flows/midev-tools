@@ -44,6 +44,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Honest File Locking**: Enforced explicit `TimeoutError` in `file_lock` when lock acquisition times out across Windows (`msvcrt`) and POSIX (`fcntl`).
 - **Concurrent Config Synchronization**: Synchronized project switching and configuration mutations under `BUILD_LOCK`, and made Studio catalog inspection strictly read-only.
 - **Palette Suggestion Deduplication & Strict Fallbacks**: Filtered duplicate fuzzy color suggestions in `Palette.__getitem__`, prevented `dark_green` from silently degrading to black, and warned on semantic fallback substitutions.
+- **Palette Semantic Fallbacks for Earth & Hair Tones**: Expanded semantic fallbacks for `brown`, `wood_dark`, `wood`, `dirt`, `sand`, and `blue` to cover palette names (`dark_tan`, `tan`, `dark_rust`, `rust`), ensuring procedural character and autotile generators work reliably across all bundled palettes including `endesga32`.
+- **Test Suite Workspace State Isolation**: Protected and restored active workspace state (`.midev/state.json`) across test discovery and execution, preventing tests from mutating or hijacking the user's active game project.
 
 ### Changed
 - Converted `SheetBuilder` and exporters to raise descriptive `ValueError` exceptions instead of raw assertion errors.

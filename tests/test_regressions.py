@@ -505,6 +505,32 @@ class TestRegressions(unittest.TestCase):
             self.assertEqual(col, (34, 139, 34, 255))
             self.assertTrue(any("substituted with fallback 'forest_dark'" in str(item.message) for item in w))
 
+    def test_character_generator_with_endesga32_palette(self):
+        """CharacterGenerator must resolve brown and hair colors in endesga32 without KeyError."""
+        import pixelkit
+        from generators.character import CharacterConfig, CharacterGenerator
+
+        orig_pal = pixelkit.PAL
+        try:
+            pixelkit.set_active_palette("endesga32")
+            c = CharacterGenerator(CharacterConfig()).draw_figure()
+            self.assertEqual(c.w, 16)
+            self.assertEqual(c.h, 24)
+        finally:
+            pixelkit.PAL = orig_pal
+
+    def test_semantic_fallback_brown_in_endesga32(self):
+        """Palette endesga32 must resolve brown, wood_dark, and blue via semantic fallbacks."""
+        from palette_kit import Palette
+
+        pal = Palette("tools/art/palettes/endesga32.hex")
+        self.assertIn("brown", pal)
+        self.assertIn("wood_dark", pal)
+        self.assertIn("blue", pal)
+        # brown should resolve to dark_tan
+        col = pal["brown"]
+        self.assertEqual(col, pal.names["dark_tan"])
+
 
 if __name__ == "__main__":
     unittest.main()

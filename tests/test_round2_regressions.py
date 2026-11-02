@@ -51,6 +51,8 @@ def read_line_with_timeout(proc: subprocess.Popen, timeout: float = 10.0) -> str
 class TestRound2Regressions(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        import projects
+        cls._orig_project = projects.get_active_project_id()
         # Start local Studio HTTP test server
         cls.server = HTTPServer(("127.0.0.1", 0), studio.StudioHandler)
         cls.port = cls.server.server_address[1]
@@ -64,7 +66,8 @@ class TestRound2Regressions(unittest.TestCase):
         cls.server.server_close()
         import projects
         try:
-            projects.set_active_project("samples/fisharium")
+            if hasattr(cls, "_orig_project") and cls._orig_project:
+                projects.set_active_project(cls._orig_project)
         except Exception:
             pass
 

@@ -20,9 +20,16 @@ import inspect_tool
 class TestInspectTool(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
+        import projects
+        projects.set_project_override("samples/fisharium")
         cfg = MidevConfig.load()
-        cfg.active_project = "samples/fisharium"
         artkit.apply_config(cfg)
+
+    @classmethod
+    def tearDownClass(cls):
+        import projects
+        projects.set_project_override(None)
+        artkit.apply_config(MidevConfig.load())
 
     def test_generate_inspection_sheet_player(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
