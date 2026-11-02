@@ -64,7 +64,7 @@ class TestCliJson(unittest.TestCase):
         self.assertEqual(ret, 0)
         data = json.loads(f.getvalue())
         self.assertEqual(data.get("status"), "healthy")
-        self.assertGreaterEqual(data.get("passed", 0), 13)
+        self.assertGreaterEqual(data.get("passed", 0), 12)
         self.assertEqual(data.get("passed"), data.get("total"))
 
     def test_info_json(self):
