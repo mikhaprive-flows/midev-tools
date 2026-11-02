@@ -13,14 +13,20 @@ ROOT_DIR = Path(__file__).resolve().parents[2]
 NAME_RE = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
 
 
+WINDOWS_RESERVED = {
+    "con", "prn", "aux", "nul",
+    *(f"com{i}" for i in range(1, 10)),
+    *(f"lpt{i}" for i in range(1, 10)),
+}
 INTERNAL_RESERVED = {"manifest", "midev", "default", "all"}
+ALL_RESERVED_NAMES = WINDOWS_RESERVED | INTERNAL_RESERVED
 
 
 def validate_name(name: str, kind: str = "name") -> str:
     """
     Validate that an identifier (recipe, project, asset, animation) consists only of
     lowercase alphanumeric characters and underscores, starting with a letter, length <= 48,
-    and is not an internal reserved keyword.
+    and is not a Windows reserved device name or internal keyword.
     """
     if not isinstance(name, str):
         raise ValueError(f"Invalid {kind}: expected string, got {type(name).__name__}")
@@ -30,8 +36,10 @@ def validate_name(name: str, kind: str = "name") -> str:
             f"Invalid {kind} '{name}': must start with a lowercase letter, contain only [a-z0-9_], "
             f"and be between 1 and 48 characters long."
         )
-    if normalized.lower() in INTERNAL_RESERVED:
-        raise ValueError(f"Invalid {kind} '{name}': '{name}' is a reserved internal name and cannot be used.")
+    if normalized.endswith("_"):
+        raise ValueError(f"Invalid {kind} '{name}': identifier cannot end with an underscore.")
+    if normalized.lower() in ALL_RESERVED_NAMES:
+        raise ValueError(f"Invalid {kind} '{name}': '{name}' is a reserved name and cannot be used.")
     return normalized
 
 

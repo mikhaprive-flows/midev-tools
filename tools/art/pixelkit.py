@@ -282,13 +282,17 @@ class SheetBuilder:
     Writes <name>.png + <name>.json (format documented in docs/ART_PIPELINE.md)."""
 
     def __init__(self, name: str, fw: int, fh: int, origin: tuple[int, int] | None = None):
-        self.name, self.fw, self.fh = name, fw, fh
+        from safepath import validate_name
+        self.name = validate_name(name, "sheet name")
+        self.fw, self.fh = fw, fh
         self.origin = origin or (fw // 2, fh - 2)  # feet position, used by the game for y-sorting
         self.anims: list[tuple[str, list[Image.Image], float, bool]] = []
         self.snapped_pixels: int = 0
         self.binarized_alpha: int = 0
 
     def add(self, anim: str, frames: Iterable[Image.Image | Canvas], fps: float = 8, loop: bool = True):
+        from safepath import validate_name
+        anim = validate_name(anim, "animation name")
         if fps <= 0:
             raise ValueError(f"FPS must be positive, got {fps} for animation '{anim}' in '{self.name}'")
         fr: list[Image.Image] = []
