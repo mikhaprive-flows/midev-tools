@@ -289,6 +289,7 @@ class SheetBuilder:
         self.anims: list[tuple[str, list[Image.Image], float, bool]] = []
         self.snapped_pixels: int = 0
         self.binarized_alpha: int = 0
+        self.extra_meta: dict[str, Any] = {}
 
     def add(self, anim: str, frames: Iterable[Image.Image | Canvas], fps: float = 8, loop: bool = True):
         from safepath import validate_name
@@ -344,6 +345,7 @@ class SheetBuilder:
             sheet_width=sheet.width,
             sheet_height=sheet.height,
             image_path=png,
+            extra_meta=dict(self.extra_meta),
         )
         target_formats = formats or ACTIVE_EXPORTERS
         exp_files = run_exporters(info, out_dir, target_formats)

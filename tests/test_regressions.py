@@ -383,6 +383,55 @@ class TestRegressions(unittest.TestCase):
         self.assertGreater(pixels_axe, pixels_nowep, "Axe must have more pixels than no weapon")
         self.assertNotEqual(pixels_axe, pixels_sword, "Axe must render distinctly from sword")
 
+    def test_autotile_canonical_47_and_grid_sidecar(self):
+        """Canonical 47-tile Wang blob must generate exact 47 sorted tiles, 8x6 grid and sidecar bitmask mapping."""
+        from PIL import Image
+        from generators.autotile import AutotileConfig, AutotileGenerator, BLOB_47_CONFIGS
+
+        # 1. Config validation
+        with self.assertRaises(ValueError):
+            AutotileConfig(tile_size=0)
+
+        # 2. Canonical 47 uniqueness and ordering
+        self.assertEqual(len(BLOB_47_CONFIGS), 47)
+        masks = [cfg["bitmask"] for cfg in BLOB_47_CONFIGS]
+        self.assertEqual(masks, sorted(masks), "Bitmasks must be sorted ascending")
+        self.assertEqual(len(set(masks)), 47, "All 47 bitmasks must be unique")
+
+        # 3. Missing canonical tiles must now exist
+        mask_set = set(masks)
+        self.assertIn(81, mask_set, "edge_E with both inner corners (mask 81) must exist")
+        self.assertIn(21, mask_set, "edge_W with both inner corners (mask 21) must exist")
+        # All 4 variants of 3 inner corners
+        three_corner_masks = {87, 93, 117, 213}
+        self.assertTrue(three_corner_masks.issubset(mask_set), "All 4 variants of 3-inner-corner must exist")
+
+        # 4. Generate 8x6 grid sheet and verify dimensions
+        gen = AutotileGenerator(AutotileConfig(tile_size=16))
+        sb = gen.generate_sheet("test_blob_terrain")
+        with tempfile.TemporaryDirectory() as td:
+            out_dir = Path(td)
+            sb.save(out_dir)
+
+            img_file = out_dir / "test_blob_terrain.png"
+            self.assertTrue(img_file.exists())
+            with Image.open(img_file) as img:
+                self.assertEqual(img.size, (128, 96), "Autotile sheet must be an 8x6 grid (128x96 at 16x16)")
+
+            # 5. Sidecar JSON must contain grid, mask_to_index, and tiles
+            json_file = out_dir / "test_blob_terrain.json"
+            self.assertTrue(json_file.exists())
+            data = json.loads(json_file.read_text(encoding="utf-8"))
+            self.assertEqual(data["grid"], {"columns": 8, "rows": 6, "tile_width": 16, "tile_height": 16})
+            self.assertEqual(data["tile_count"], 47)
+            self.assertIn("mask_to_index", data)
+            self.assertEqual(len(data["mask_to_index"]), 256)
+            self.assertEqual(data["mask_to_index"]["255"], 46)
+            self.assertEqual(data["mask_to_index"]["0"], 0)
+            self.assertEqual(len(data["tiles"]), 47)
+            self.assertEqual(data["tiles"][0]["name"], "island_single")
+            self.assertEqual(data["tiles"][46]["name"], "center")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -4,7 +4,7 @@ Base class and data containers for midev-tools asset exporters.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -30,6 +30,7 @@ class SheetInfo:
     sheet_width: int
     sheet_height: int
     image_path: Path
+    extra_meta: dict[str, Any] = field(default_factory=dict)
 
 
 class BaseExporter(ABC):

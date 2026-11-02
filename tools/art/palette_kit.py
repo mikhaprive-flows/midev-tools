@@ -58,6 +58,7 @@ SEMANTIC_FALLBACKS: dict[str, list[str]] = {
     "skin_shade": ["skin_shade", "peach", "brown", "tan"],
     "forest": ["forest", "dark_green", "green"],
     "forest_dark": ["forest_dark", "dark_green", "black"],
+    "dark_green": ["dark_green", "forest_dark", "forest", "green", "black"],
     "grass": ["grass", "green", "bright_green"],
     "grass_light": ["grass_light", "light_green", "green", "yellow"],
     "water": ["water", "blue", "dark_blue", "sky_blue"],

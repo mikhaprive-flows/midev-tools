@@ -30,7 +30,22 @@ class NativeExporter(BaseExporter):
                 "fps": anim.fps,
                 "loop": anim.loop,
             }
+        if getattr(info, "extra_meta", None):
+            meta.update(info.extra_meta)
 
         target = out_dir / f"{info.name}.json"
         target.write_text(json.dumps(meta, indent=2), encoding="utf-8")
-        return [target]
+        created = [target]
+
+        if getattr(info, "extra_meta", None) and "mask_to_index" in info.extra_meta:
+            autotile_target = out_dir / f"{info.name}_autotile.json"
+            autotile_payload = {
+                "name": info.name,
+                "image": info.image_path.name,
+                "tile_size": info.fw,
+                **info.extra_meta,
+            }
+            autotile_target.write_text(json.dumps(autotile_payload, indent=2), encoding="utf-8")
+            created.append(autotile_target)
+
+        return created

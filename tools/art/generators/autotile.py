@@ -1,13 +1,28 @@
 """
-autotile - 47-Tile Wang Blob Bitmask Autotile Generator.
+autotile - Canonical 47-Tile Wang Blob Bitmask Autotile Generator.
 Generates standard 3x3 minimal bitmask terrain transition sheets compatible with Godot 4 TileSet, Tiled, and RPG Maker.
+Arranges 47 canonical tiles + 1 pad tile into an 8x6 grid with full bitmask sidecar metadata.
 """
 from __future__ import annotations
 
+import itertools
 from dataclasses import dataclass
 from typing import Any
 
 from pixelkit import Canvas, SheetBuilder
+
+DIR_ORDER: list[str] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+
+BIT_WEIGHTS: dict[str, int] = {
+    "N": 1,
+    "NE": 2,
+    "E": 4,
+    "SE": 8,
+    "S": 16,
+    "SW": 32,
+    "W": 64,
+    "NW": 128,
+}
 
 
 @dataclass
@@ -21,60 +36,151 @@ class AutotileConfig:
     highlight_color: str = "foam"
     style: str = "terrain"
 
+    def __post_init__(self):
+        if self.tile_size <= 0:
+            raise ValueError(f"tile_size must be positive, got {self.tile_size}")
 
-BLOB_47_CONFIGS = [
-    {"name": "center", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 1, "NE": 1, "SE": 1, "SW": 1},
-    {"name": "edge_N", "N": 0, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 1, "SW": 1},
-    {"name": "edge_E", "N": 1, "E": 0, "S": 1, "W": 1, "NW": 1, "NE": 0, "SE": 0, "SW": 1},
-    {"name": "edge_S", "N": 1, "E": 1, "S": 0, "W": 1, "NW": 1, "NE": 1, "SE": 0, "SW": 0},
-    {"name": "edge_W", "N": 1, "E": 1, "S": 1, "W": 0, "NW": 0, "NE": 1, "SE": 1, "SW": 0},
-    {"name": "corner_outer_NW", "N": 0, "E": 1, "S": 1, "W": 0, "NW": 0, "NE": 0, "SE": 1, "SW": 0},
-    {"name": "corner_outer_NE", "N": 0, "E": 0, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 1},
-    {"name": "corner_outer_SE", "N": 1, "E": 0, "S": 0, "W": 1, "NW": 1, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "corner_outer_SW", "N": 1, "E": 1, "S": 0, "W": 0, "NW": 0, "NE": 1, "SE": 0, "SW": 0},
-    {"name": "corner_inner_NW", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 1, "SE": 1, "SW": 1},
-    {"name": "corner_inner_NE", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 1, "NE": 0, "SE": 1, "SW": 1},
-    {"name": "corner_inner_SE", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 1, "NE": 1, "SE": 0, "SW": 1},
-    {"name": "corner_inner_SW", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 1, "NE": 1, "SE": 1, "SW": 0},
-    {"name": "tube_horiz", "N": 0, "E": 1, "S": 0, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "tube_vert", "N": 1, "E": 0, "S": 1, "W": 0, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "island_single", "N": 0, "E": 0, "S": 0, "W": 0, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "cap_N", "N": 0, "E": 0, "S": 1, "W": 0, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "cap_E", "N": 0, "E": 0, "S": 0, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "cap_S", "N": 1, "E": 0, "S": 0, "W": 0, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "cap_W", "N": 0, "E": 1, "S": 0, "W": 0, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "t_junction_N", "N": 0, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 1, "SW": 1},
-    {"name": "t_junction_E", "N": 1, "E": 0, "S": 1, "W": 1, "NW": 1, "NE": 0, "SE": 0, "SW": 1},
-    {"name": "t_junction_S", "N": 1, "E": 1, "S": 0, "W": 1, "NW": 1, "NE": 1, "SE": 0, "SW": 0},
-    {"name": "t_junction_W", "N": 1, "E": 1, "S": 1, "W": 0, "NW": 0, "NE": 1, "SE": 1, "SW": 0},
-    {"name": "diag_inner_NW_SE", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 1, "SE": 0, "SW": 1},
-    {"name": "diag_inner_NE_SW", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 1, "NE": 0, "SE": 1, "SW": 0},
-    {"name": "inner_NW_NE", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 1, "SW": 1},
-    {"name": "inner_NE_SE", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 1, "NE": 0, "SE": 0, "SW": 1},
-    {"name": "inner_SE_SW", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 1, "NE": 1, "SE": 0, "SW": 0},
-    {"name": "inner_SW_NW", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 1, "SE": 1, "SW": 0},
-    {"name": "inner_3_corners_A", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 1},
-    {"name": "inner_3_corners_B", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 1, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "edge_N_inner_SE", "N": 0, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 1},
-    {"name": "edge_N_inner_SW", "N": 0, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 1, "SW": 0},
-    {"name": "edge_N_inner_both", "N": 0, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "edge_S_inner_NE", "N": 1, "E": 1, "S": 0, "W": 1, "NW": 1, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "edge_S_inner_NW", "N": 1, "E": 1, "S": 0, "W": 1, "NW": 0, "NE": 1, "SE": 0, "SW": 0},
-    {"name": "edge_S_inner_both", "N": 1, "E": 1, "S": 0, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "edge_E_inner_NW", "N": 1, "E": 0, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 1},
-    {"name": "edge_E_inner_SW", "N": 1, "E": 0, "S": 1, "W": 1, "NW": 1, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "edge_W_inner_NE", "N": 1, "E": 1, "S": 1, "W": 0, "NW": 0, "NE": 0, "SE": 1, "SW": 0},
-    {"name": "edge_W_inner_SE", "N": 1, "E": 1, "S": 1, "W": 0, "NW": 0, "NE": 1, "SE": 0, "SW": 0},
-    {"name": "corner_NW_inner_SE", "N": 0, "E": 1, "S": 1, "W": 0, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "corner_NE_inner_SW", "N": 0, "E": 0, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "corner_SE_inner_NW", "N": 1, "E": 0, "S": 0, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "corner_SW_inner_NE", "N": 1, "E": 1, "S": 0, "W": 0, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-    {"name": "inner_4_corners", "N": 1, "E": 1, "S": 1, "W": 1, "NW": 0, "NE": 0, "SE": 0, "SW": 0},
-]
+
+def normalize_diagonal_neighbors(d: dict[str, int]) -> dict[str, int]:
+    """Normalize diagonal corner neighbors according to Wang/Blob minimal 3x3 rules.
+
+    A diagonal neighbor only affects the tile boundary if both adjacent cardinal neighbors are present.
+    """
+    res = dict(d)
+    if not (res.get("N") and res.get("E")):
+        res["NE"] = 0
+    if not (res.get("S") and res.get("E")):
+        res["SE"] = 0
+    if not (res.get("S") and res.get("W")):
+        res["SW"] = 0
+    if not (res.get("N") and res.get("W")):
+        res["NW"] = 0
+    return res
+
+
+def compute_bitmask(d: dict[str, int]) -> int:
+    """Calculate integer bitmask value from neighbor dictionary."""
+    return sum(d.get(k, 0) * BIT_WEIGHTS[k] for k in DIR_ORDER)
+
+
+def name_tile_configuration(d: dict[str, int], mask: int) -> str:
+    """Derive canonical descriptive name for a tile bitmask configuration."""
+    cards = tuple(k for k in ["N", "E", "S", "W"] if d.get(k))
+    diags = tuple(k for k in ["NW", "NE", "SE", "SW"] if d.get(k))
+
+    if len(cards) == 0:
+        return "island_single"
+    if len(cards) == 1:
+        return f"cap_{cards[0]}"
+    if len(cards) == 2:
+        if cards == ("N", "S"):
+            return "tube_vert"
+        if cards == ("E", "W"):
+            return "tube_horiz"
+        c_pair = f"{cards[0]}{cards[1]}"
+        if c_pair == "ES":
+            c_pair = "SE"
+        c_name = f"corner_outer_{c_pair}"
+        if diags:
+            return f"{c_name}_diag"
+        return c_name
+    if len(cards) == 3:
+        missing = [c for c in ["N", "E", "S", "W"] if c not in cards][0]
+        edge = f"edge_{missing}"
+        if missing == "N":
+            all_possible = {"SE", "SW"}
+        elif missing == "E":
+            all_possible = {"NW", "SW"}
+        elif missing == "S":
+            all_possible = {"NW", "NE"}
+        else:  # W
+            all_possible = {"NE", "SE"}
+        present_diags = set(diags)
+        missing_diags = all_possible - present_diags
+        if not missing_diags:
+            return edge
+        elif len(missing_diags) == 2:
+            return f"{edge}_inner_both"
+        else:
+            miss = list(missing_diags)[0]
+            return f"{edge}_inner_{miss}"
+    if len(cards) == 4:
+        missing_diags = {"NW", "NE", "SE", "SW"} - set(diags)
+        if len(missing_diags) == 0:
+            return "center"
+        if len(missing_diags) == 1:
+            return f"corner_inner_{list(missing_diags)[0]}"
+        if len(missing_diags) == 4:
+            return "inner_4_corners"
+        if len(missing_diags) == 3:
+            present = list(diags)[0]
+            return f"inner_3_corners_{present}"
+        if len(missing_diags) == 2:
+            miss_sorted = sorted(list(missing_diags))
+            return f"diag_inner_{miss_sorted[0]}_{miss_sorted[1]}"
+    return f"tile_{mask}"
+
+
+def generate_canonical_47_configs() -> list[dict[str, Any]]:
+    """Generate all 47 canonical Wang Blob tile configurations using itertools.
+
+    Each config contains:
+      - 'name': descriptive name
+      - 'bitmask': integer bitmask value
+      - 'index': tile index (0..46)
+      - 'grid_col': column index in 8x6 grid (0..7)
+      - 'grid_row': row index in 8x6 grid (0..5)
+      - 'N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW': 0 or 1
+    """
+    canonical_map: dict[int, dict[str, int]] = {}
+    for p in itertools.product([0, 1], repeat=8):
+        raw_d = dict(zip(DIR_ORDER, p))
+        norm_d = normalize_diagonal_neighbors(raw_d)
+        c_mask = compute_bitmask(norm_d)
+        canonical_map[c_mask] = norm_d
+
+    sorted_masks = sorted(canonical_map.keys())
+    assert len(sorted_masks) == 47, f"Expected 47 canonical masks, got {len(sorted_masks)}"
+
+    configs: list[dict[str, Any]] = []
+    for idx, mask in enumerate(sorted_masks):
+        d = dict(canonical_map[mask])
+        name = name_tile_configuration(d, mask)
+        cfg: dict[str, Any] = {
+            "name": name,
+            "bitmask": mask,
+            "index": idx,
+            "grid_col": idx % 8,
+            "grid_row": idx // 8,
+        }
+        cfg.update(d)
+        configs.append(cfg)
+    return configs
+
+
+BLOB_47_CONFIGS: list[dict[str, Any]] = generate_canonical_47_configs()
+CANONICAL_47_CONFIGS: list[dict[str, Any]] = BLOB_47_CONFIGS
+
+
+def build_mask_to_index_map() -> dict[str, int]:
+    """Build a comprehensive mapping of all 256 8-bit masks to canonical tile index (0..46).
+
+    Keys are string representations of the integer mask (compatible with JSON object keys).
+    """
+    mask_map: dict[str, int] = {}
+    canonical_index = {cfg["bitmask"]: cfg["index"] for cfg in BLOB_47_CONFIGS}
+
+    for p in itertools.product([0, 1], repeat=8):
+        raw_d = dict(zip(DIR_ORDER, p))
+        raw_mask = compute_bitmask(raw_d)
+        norm_d = normalize_diagonal_neighbors(raw_d)
+        norm_mask = compute_bitmask(norm_d)
+        mask_map[str(raw_mask)] = canonical_index[norm_mask]
+    return mask_map
 
 
 class AutotileGenerator:
-    """Generates standard 47-tile Wang blob autotile sheets."""
+    """Generates standard 47-tile Wang blob autotile sheets in 8x6 grid layout."""
 
     def __init__(self, config: AutotileConfig | None = None):
         self.cfg = config or AutotileConfig()
@@ -111,7 +217,7 @@ class AutotileGenerator:
             c.px(x1 - 3, y1 - 3, inner_sh)
             c.px((x0 + x1) // 2, (y0 + y1) // 2, hi)
 
-        # 3. Outer corner cutouts
+        # 3. Inner corner cutouts (cut into inner terrain if adjacent cardinals are filled but diagonal is 0)
         if not nw and n and w:
             c.px(0, 0, outer)
             c.px(1, 0, border)
@@ -155,7 +261,40 @@ class AutotileGenerator:
         for cfg_item in BLOB_47_CONFIGS:
             tiles.append(self.draw_tile(cfg_item))
 
-        # Pad with 1 empty tile to make full 48 (8x6)
+        # Pad with 1 empty tile to make full 48 (8x6 grid)
         tiles.append(Canvas(self.size, self.size))
-        sb.add("tiles_47", tiles, fps=1, loop=False)
+
+        # Pack into 6 rows of 8 columns each (Godot TileSet / RPG Maker standard 8x6 grid)
+        for r in range(6):
+            row_tiles = tiles[r * 8 : (r + 1) * 8]
+            sb.add(f"row_{r}", row_tiles, fps=1, loop=False)
+
+        # Sidecar autotile metadata
+        mask_to_index = build_mask_to_index_map()
+        tile_meta = [
+            {
+                "index": cfg["index"],
+                "name": cfg["name"],
+                "bitmask": cfg["bitmask"],
+                "grid_col": cfg["grid_col"],
+                "grid_row": cfg["grid_row"],
+                "pixel_x": cfg["grid_col"] * self.size,
+                "pixel_y": cfg["grid_row"] * self.size,
+                "neighbors": {k: cfg[k] for k in DIR_ORDER},
+            }
+            for cfg in BLOB_47_CONFIGS
+        ]
+        sb.extra_meta = {
+            "type": "autotile_blob47",
+            "grid": {
+                "columns": 8,
+                "rows": 6,
+                "tile_width": self.size,
+                "tile_height": self.size,
+            },
+            "tile_count": 47,
+            "mask_to_index": mask_to_index,
+            "tiles": tile_meta,
+            "canonical_bitmasks": [cfg["bitmask"] for cfg in BLOB_47_CONFIGS],
+        }
         return sb
