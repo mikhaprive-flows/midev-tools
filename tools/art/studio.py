@@ -320,18 +320,30 @@ class StudioHandler(BaseHTTPRequestHandler):
         # Trigger Build
         if path == "/api/build" or path == "/api/build/":
             print("[studio] Triggering build for all recipes...")
-            ret = artkit.cmd_build([])
-            broadcast_event({"type": "reload", "recipe": "all", "target": "all"})
-            self.send_json({"status": "ok" if ret == 0 else "error", "recipe": "all", "target": "all"})
+            try:
+                ret = artkit.cmd_build([])
+                broadcast_event({"type": "reload", "recipe": "all", "target": "all"})
+                self.send_json({"status": "ok" if ret == 0 else "error", "recipe": "all", "target": "all"})
+            except KeyboardInterrupt:
+                raise
+            except BaseException as e:
+                err_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+                self.send_json({"status": "error", "message": err_msg, "recipe": "all", "target": "all"})
             return
         elif path.startswith("/api/build/"):
             target_name = path[len("/api/build/"):].strip()
             cfg = MidevConfig.load()
             recipe_name = get_recipe_for_asset(target_name, out_dir=cfg.output_dir)
             print(f"[studio] Triggering build for: {recipe_name} (target: {target_name})")
-            ret = artkit.cmd_build([recipe_name])
-            broadcast_event({"type": "reload", "recipe": recipe_name, "target": target_name})
-            self.send_json({"status": "ok" if ret == 0 else "error", "recipe": recipe_name, "target": target_name})
+            try:
+                ret = artkit.cmd_build([recipe_name])
+                broadcast_event({"type": "reload", "recipe": recipe_name, "target": target_name})
+                self.send_json({"status": "ok" if ret == 0 else "error", "recipe": recipe_name, "target": target_name})
+            except KeyboardInterrupt:
+                raise
+            except BaseException as e:
+                err_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+                self.send_json({"status": "error", "message": err_msg, "recipe": recipe_name, "target": target_name})
             return
 
         self.send_error(HTTPStatus.NOT_FOUND, "Not found")

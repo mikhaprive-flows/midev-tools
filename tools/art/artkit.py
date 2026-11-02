@@ -501,11 +501,14 @@ def build_recipes(
                         "snapped_pixels": stats["snapped_pixels"],
                         "binarized_alpha": stats["binarized_alpha"],
                     })
-            except Exception as e:
+            except KeyboardInterrupt:
+                raise
+            except BaseException as e:
                 tb = traceback.format_exc()
+                err_str = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
                 errors.append({
                     "recipe": p.stem,
-                    "error": str(e),
+                    "error": err_str,
                     "traceback": tb,
                 })
                 manifest.load()

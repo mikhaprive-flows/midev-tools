@@ -88,10 +88,14 @@ class MCPServer:
         self._write_lock = threading.Lock()
         self._executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         self._last_build_errors: dict[str, Any] = {}
+        self._replied_ids: set[Any] = set()
+        self._replied_lock = threading.Lock()
         self.cfg = MidevConfig.load()
         artkit.apply_config(self.cfg)
 
     def send_response(self, response_id: Any, result: Any):
+        with self._replied_lock:
+            self._replied_ids.add(response_id)
         msg = {
             "jsonrpc": "2.0",
             "id": response_id,
@@ -103,6 +107,8 @@ class MCPServer:
             self._stdout.flush()
 
     def send_error(self, response_id: Any, code: int, message: str, data: Any = None):
+        with self._replied_lock:
+            self._replied_ids.add(response_id)
         msg = {
             "jsonrpc": "2.0",
             "id": response_id,
@@ -294,9 +300,22 @@ class MCPServer:
         with contextlib.redirect_stdout(sys.stderr):
             try:
                 self.handle_tools_call(req_id, params)
-            except Exception as e:
+            except KeyboardInterrupt:
+                raise
+            except BaseException as e:
                 import traceback
-                self.send_tool_error(req_id, f"Tool execution failed: {e}", traceback_str=traceback.format_exc())
+                err_msg = f"{type(e).__name__}: {e}" if str(e) else type(e).__name__
+                self.send_tool_error(req_id, f"Tool execution failed ({err_msg})", traceback_str=traceback.format_exc())
+
+    def _on_tool_call_done(self, future, req_id: Any):
+        exc = future.exception()
+        if exc is not None:
+            sys.stderr.write(f"[mcp] Uncaught tool worker exception for id {req_id}: {exc}\n")
+            with self._replied_lock:
+                already_replied = req_id in self._replied_ids
+            if not already_replied:
+                err_msg = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+                self.send_tool_error(req_id, f"Tool worker failure: {err_msg}")
 
     def handle_tools_call(self, req_id: Any, params: dict[str, Any]):
         if not isinstance(params, dict):
@@ -523,7 +542,8 @@ class MCPServer:
             elif method == "tools/list":
                 self.handle_tools_list(req_id)
             elif method == "tools/call":
-                self._executor.submit(self._dispatch_tool_call, req_id, params)
+                fut = self._executor.submit(self._dispatch_tool_call, req_id, params)
+                fut.add_done_callback(lambda f, r=req_id: self._on_tool_call_done(f, r))
             else:
                 if req_id is not None:
                     self.send_error(req_id, -32601, f"Method not found: {method}")
