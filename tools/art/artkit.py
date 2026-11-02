@@ -496,7 +496,7 @@ def build_recipes(
                     built=[],
                     skipped=[],
                     errors=[{"recipe": "clean", "error": str(e), "traceback": ""}],
-                    validation=ValidationResult(status="failed", violations=1, total_assets=0, assets=[]).to_dict(),
+                    validation=ValidationResult(status="skipped", violations=0, total_assets=0, assets=[]).to_dict(),
                 )
 
         # 2. Check if output directory is safe to write to
@@ -508,7 +508,7 @@ def build_recipes(
                 built=[],
                 skipped=[],
                 errors=[{"recipe": "clean" if clean else "config", "error": err_out, "traceback": ""}],
-                validation=ValidationResult(status="failed", violations=1, total_assets=0, assets=[]).to_dict(),
+                validation=ValidationResult(status="skipped", violations=0, total_assets=0, assets=[]).to_dict(),
             )
 
         cache_file = out / ".midev-cache.json"
@@ -532,7 +532,7 @@ def build_recipes(
                     built=[],
                     skipped=[],
                     errors=[{"recipe": "clean", "error": str(e), "traceback": ""}],
-                    validation=ValidationResult(status="failed", violations=1, total_assets=0, assets=[]).to_dict(),
+                    validation=ValidationResult(status="skipped", violations=0, total_assets=0, assets=[]).to_dict(),
                 )
 
         if incremental and not force:
@@ -708,7 +708,8 @@ def cmd_build(
                     print(f"     {line}")
 
     val = result.validation
-    print(f"[artkit] Validation: {val.get('status', 'unknown').upper()} ({val.get('violations', 0)} violations across {val.get('totalAssets', 0)} assets)")
+    if val.get("status") != "skipped":
+        print(f"[artkit] Validation: {val.get('status', 'unknown').upper()} ({val.get('violations', 0)} violations across {val.get('totalAssets', 0)} assets)")
     return 0 if result.status == "ok" else 1
 
 

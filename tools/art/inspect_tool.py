@@ -88,10 +88,14 @@ def generate_inspection_sheet(
 
     if not target_png:
         for cat in ("sprites", "tiles", "ui", "backgrounds"):
-            matches = sorted(list((out_dir / cat).glob(f"{recipe_name}*.png")))
-            if matches:
-                target_png = matches[0]
-                target_json = matches[0].with_suffix(".json")
+            cat_dir = out_dir / cat
+            if cat_dir.exists():
+                for f in sorted(cat_dir.rglob("*.png")):
+                    if f.stem == recipe_name and not f.name.startswith("."):
+                        target_png = f
+                        target_json = f.with_suffix(".json")
+                        break
+            if target_png:
                 break
 
     if not target_png or not target_png.exists():
