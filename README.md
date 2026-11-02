@@ -8,6 +8,8 @@
 [![Trakteer Support](https://img.shields.io/badge/Trakteer-Support%20Developer-be1e2d?style=flat-square)](https://trakteer.id/MiDevFish)
 [![Architecture](https://img.shields.io/badge/Architecture-100%25%20Pure%20Python-orange?style=flat-square)](tools/art/)
 
+**English** | [Bahasa Indonesia](README.id.md)
+
 `midev-tools` is a modular, standalone pixel art and vector asset generation toolkit for 2D game development.
 Built on a **Dual-Audience Architecture**: powerful and lightweight for **human programmers** writing manual code, and natively optimized for **vibe coders & AI coding agents** (Claude, Cursor, Antigravity, Windsurf) through MCP and multimodal visual verification.
 
@@ -260,7 +262,8 @@ midev_art_tools/
 ├── docs/
 │   ├── ART_PIPELINE.md       # Pipeline architecture & style specifications
 │   └── images/               # Documentation screenshots & showcase animations
-└── README.md                 # Project documentation
+├── README.md                 # Project documentation (English)
+└── README.id.md              # Project documentation (Bahasa Indonesia)
 ```
 
 ---
