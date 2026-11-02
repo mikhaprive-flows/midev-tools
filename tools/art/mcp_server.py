@@ -517,6 +517,43 @@ class MCPServer:
         else:
             self.send_tool_error(req_id, f"Unknown tool: '{name}'")
 
+    def _handle_single_message(self, msg: Any):
+        if not isinstance(msg, dict):
+            self.send_error(None, -32600, f"Invalid Request: message must be a JSON object, got {type(msg).__name__}")
+            return
+
+        req_id = msg.get("id")
+        if req_id is not None and not isinstance(req_id, (str, int)):
+            self.send_error(None, -32600, f"Invalid Request: id must be string, integer, or null, got {type(req_id).__name__}")
+            return
+
+        method = msg.get("method")
+        if not isinstance(method, str):
+            self.send_error(req_id, -32600, f"Invalid Request: method must be a string, got {type(method).__name__}")
+            return
+
+        params = msg.get("params", {})
+        if params is not None and not isinstance(params, dict):
+            self.send_error(req_id, -32602, f"Invalid params: expected object, got {type(params).__name__}")
+            return
+        if params is None:
+            params = {}
+
+        if method == "initialize":
+            self.handle_initialize(req_id, params)
+        elif method == "notifications/initialized":
+            pass
+        elif method == "ping":
+            self.send_response(req_id, {})
+        elif method == "tools/list":
+            self.handle_tools_list(req_id)
+        elif method == "tools/call":
+            fut = self._executor.submit(self._dispatch_tool_call, req_id, params)
+            fut.add_done_callback(lambda f, r=req_id: self._on_tool_call_done(f, r))
+        else:
+            if req_id is not None:
+                self.send_error(req_id, -32601, f"Method not found: {method}")
+
     def run(self):
         # Read standard input JSON-RPC messages line by line
         for line in sys.stdin:
@@ -524,29 +561,26 @@ class MCPServer:
             if not line:
                 continue
             try:
-                msg = json.loads(line)
+                try:
+                    msg = json.loads(line)
+                except Exception as e:
+                    self.send_error(None, -32700, f"Parse error: {str(e)}")
+                    continue
+
+                if isinstance(msg, list):
+                    if not msg:
+                        self.send_error(None, -32600, "Invalid Request: batch array cannot be empty")
+                    else:
+                        for sub_msg in msg:
+                            self._handle_single_message(sub_msg)
+                else:
+                    self._handle_single_message(msg)
             except Exception as e:
-                self.send_error(None, -32700, f"Parse error: {str(e)}")
-                continue
-
-            method = msg.get("method")
-            req_id = msg.get("id")
-            params = msg.get("params", {})
-
-            if method == "initialize":
-                self.handle_initialize(req_id, params)
-            elif method == "notifications/initialized":
-                pass
-            elif method == "ping":
-                self.send_response(req_id, {})
-            elif method == "tools/list":
-                self.handle_tools_list(req_id)
-            elif method == "tools/call":
-                fut = self._executor.submit(self._dispatch_tool_call, req_id, params)
-                fut.add_done_callback(lambda f, r=req_id: self._on_tool_call_done(f, r))
-            else:
-                if req_id is not None:
-                    self.send_error(req_id, -32601, f"Method not found: {method}")
+                sys.stderr.write(f"[mcp] Unexpected error in message loop: {e}\n")
+                try:
+                    self.send_error(None, -32603, f"Internal server error: {e}")
+                except Exception:
+                    pass
 
         self._executor.shutdown(wait=True)
 
