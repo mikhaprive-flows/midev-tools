@@ -1076,6 +1076,20 @@ def cmd_studio(port: int = 8080, no_open: bool = False) -> int:
     return studio.run_studio(port=port, open_browser=not no_open)
 
 
+class MidevArgumentParser(argparse.ArgumentParser):
+    """Custom ArgumentParser providing JSON error payloads when --json is passed."""
+
+    def error(self, message: str):
+        if "--json" in sys.argv:
+            err_payload = {
+                "status": "error",
+                "errors": [{"recipe": "cli", "error": message}],
+            }
+            print(json.dumps(err_payload, indent=2))
+            sys.exit(2)
+        super().error(message)
+
+
 def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--project", type=str, default=None, help="Game project or sample to operate on")
@@ -1084,68 +1098,85 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--preview", "-p", type=str, default=None, help="Output directory for preview GIFs/PNGs")
     common.add_argument("--palette", type=str, default=None, help="Active palette name or file")
     common.add_argument("--format", "-f", type=str, default=None, help="Export format(s): godot, texturepacker, slices, native, all")
-    common.add_argument("--clean", action="store_true", help="Clean output directory before building")
-    common.add_argument("--allow-external-output", action="store_true", help="Allow building into directory outside workspace")
-    common.add_argument("--allow-nonempty-output", action="store_true", help="Allow building into existing non-empty directory")
-    common.add_argument("--debug", action="store_true", help="Show full traceback on errors")
-    common.add_argument("--json", action="store_true", help="Output machine-readable JSON (ideal for AI agents and automation)")
+    common.add_argument("--clean", action="store_true", default=False, help="Clean output directory before building")
+    common.add_argument("--allow-external-output", action="store_true", default=False, help="Allow building into directory outside workspace")
+    common.add_argument("--allow-nonempty-output", action="store_true", default=False, help="Allow building into existing non-empty directory")
+    common.add_argument("--debug", action="store_true", default=False, help="Show full traceback on errors")
+    common.add_argument("--json", action="store_true", default=False, help="Output machine-readable JSON (ideal for AI agents and automation)")
 
-    parser = argparse.ArgumentParser(prog="artkit", parents=[common], description="midev-tools code-generated game art pipeline")
+    common_sub = argparse.ArgumentParser(add_help=False)
+    common_sub.add_argument("--project", type=str, default=argparse.SUPPRESS, help="Game project or sample to operate on")
+    common_sub.add_argument("--config", "-c", type=str, default=argparse.SUPPRESS, help="Path to master config file")
+    common_sub.add_argument("--out", "-o", type=str, default=argparse.SUPPRESS, help="Output directory for generated assets")
+    common_sub.add_argument("--preview", "-p", type=str, default=argparse.SUPPRESS, help="Output directory for preview GIFs/PNGs")
+    common_sub.add_argument("--palette", type=str, default=argparse.SUPPRESS, help="Active palette name or file")
+    common_sub.add_argument("--format", "-f", type=str, default=argparse.SUPPRESS, help="Export format(s): godot, texturepacker, slices, native, all")
+    common_sub.add_argument("--clean", action="store_true", default=argparse.SUPPRESS, help="Clean output directory before building")
+    common_sub.add_argument("--allow-external-output", action="store_true", default=argparse.SUPPRESS, help="Allow building into directory outside workspace")
+    common_sub.add_argument("--allow-nonempty-output", action="store_true", default=argparse.SUPPRESS, help="Allow building into existing non-empty directory")
+    common_sub.add_argument("--debug", action="store_true", default=argparse.SUPPRESS, help="Show full traceback on errors")
+    common_sub.add_argument("--json", action="store_true", default=argparse.SUPPRESS, help="Output machine-readable JSON (ideal for AI agents and automation)")
+
+    parser = MidevArgumentParser(prog="artkit", parents=[common], description="midev-tools code-generated game art pipeline")
     subparsers = parser.add_subparsers(dest="command", help="Command to run")
 
-    subparsers.add_parser("list", parents=[common], help="List all available art recipes in the active project")
+    subparsers.add_parser("list", parents=[common_sub], help="List all available art recipes in the active project")
 
-    sub_inspect = subparsers.add_parser("inspect", parents=[common], help="Generate multimodal visual verification sheet for AI agents and developers")
+    sub_inspect = subparsers.add_parser("inspect", parents=[common_sub], help="Generate multimodal visual verification sheet for AI agents and developers")
     sub_inspect.add_argument("recipe", type=str, nargs="?", default="player", help="Recipe name to visually inspect")
     sub_inspect.add_argument("--scale", type=int, default=4, help="Scale factor (default: 4)")
     sub_inspect.add_argument("--out-file", type=str, default=None, help="Custom output image path")
 
-    sub_build = subparsers.add_parser("build", parents=[common], help="Build art recipes")
+    sub_build = subparsers.add_parser("build", parents=[common_sub], help="Build art recipes")
     sub_build.add_argument("recipes", nargs="*", default=[], help="Specific recipes to build (omit for all)")
-    sub_build.add_argument("--incremental", "-i", action="store_true", help="Build only modified recipes")
-    sub_build.add_argument("--force", action="store_true", help="Force rebuild all recipes bypassing cache")
+    sub_build.add_argument("--incremental", "-i", action="store_true", default=argparse.SUPPRESS, help="Build only modified recipes")
+    sub_build.add_argument("--force", action="store_true", default=argparse.SUPPRESS, help="Force rebuild all recipes bypassing cache")
 
-    sub_validate = subparsers.add_parser("validate", parents=[common], help="Validate compiled assets")
+    sub_validate = subparsers.add_parser("validate", parents=[common_sub], help="Validate compiled assets")
     sub_validate.add_argument("--target", "-t", type=str, default=None, help="Directory to validate")
 
-    sub_new = subparsers.add_parser("new", parents=[common], help="Scaffold a new recipe in the active project")
+    sub_new = subparsers.add_parser("new", parents=[common_sub], help="Scaffold a new recipe in the active project")
     sub_new.add_argument("name", type=str, help="Recipe name")
     sub_new.add_argument("--template", choices=["character", "autotile", "vfx", "ui"], default=None, help="Generator template")
 
-    sub_project = subparsers.add_parser("project", parents=[common], help="Manage game projects and samples")
+    sub_project = subparsers.add_parser("project", parents=[common_sub], help="Manage game projects and samples")
     sub_project.add_argument("sub_action", choices=["list", "create", "use", "info"], nargs="?", default="list", help="Project action")
     sub_project.add_argument("proj_name", nargs="?", default=None, help="Project name or id")
     sub_project.add_argument("--palette-name", default="pico8", help="Palette for new project (default: pico8)")
     sub_project.add_argument("--starter", choices=["rpg", "minimal"], default="rpg", help="Starter template for new project")
     sub_project.add_argument("--out-dir", default=None, help="Custom output directory for new project")
 
-    sub_generate = subparsers.add_parser("generate", parents=[common], help="Procedural asset generators")
+    sub_generate = subparsers.add_parser("generate", parents=[common_sub], help="Procedural asset generators")
     sub_generate.add_argument("gen_type", choices=["character", "autotile", "vfx", "ui"], help="Generator type")
     sub_generate.add_argument("--name", default=None, help="Output asset sheet name")
 
-    sub_palette = subparsers.add_parser("palette", parents=[common], help="Palette inspection and management")
-    sub_palette.add_argument("sub_action", choices=["list", "inspect"], nargs="?", default="list", help="Palette action")
+    sub_palette = subparsers.add_parser("palette", parents=[common_sub], help="Palette inspection and management")
+    sub_palette.add_argument("sub_action", nargs="?", default="list", help="Palette action")
     sub_palette.add_argument("pal_name", nargs="?", default=None, help="Palette name to inspect")
 
-    sub_watch = subparsers.add_parser("watch", parents=[common], help="Start live file watcher with hot-reloading")
+    sub_watch = subparsers.add_parser("watch", parents=[common_sub], help="Start live file watcher with hot-reloading")
     sub_watch.add_argument("recipe", nargs="?", default=None, help="Specific recipe to watch (optional)")
 
-    sub_studio = subparsers.add_parser("studio", parents=[common], help="Start interactive Live Preview Studio web UI")
+    sub_studio = subparsers.add_parser("studio", parents=[common_sub], help="Start interactive Live Preview Studio web UI")
     sub_studio.add_argument("--port", type=int, default=8080, help="HTTP server port (default: 8080)")
-    sub_studio.add_argument("--no-open", action="store_true", help="Do not open browser automatically")
+    sub_studio.add_argument("--no-open", action="store_true", default=argparse.SUPPRESS, help="Do not open browser automatically")
 
-    subparsers.add_parser("doctor", parents=[common], help="Run system and environment diagnostics")
-    subparsers.add_parser("info", parents=[common], help="Display active project configuration overview")
+    subparsers.add_parser("doctor", parents=[common_sub], help="Run system and environment diagnostics")
+    subparsers.add_parser("info", parents=[common_sub], help="Display active project configuration overview")
 
     return parser
 
 
 def main(argv: list[str]) -> int:
     parser = build_parser()
-    args, unknown = parser.parse_known_args(argv)
+    if not argv:
+        parser.print_help()
+        return 0
 
-    as_json = bool(getattr(args, "json", False) or ("--json" in unknown) or ("--json" in argv))
-    is_debug = bool(getattr(args, "debug", False) or ("--debug" in unknown) or ("--debug" in argv))
+    args = parser.parse_args(argv)
+
+    as_json = bool(getattr(args, "json", False))
+    is_debug = bool(getattr(args, "debug", False))
 
     # If --project was specified, set in-memory project override (does not mutate config on disk)
     proj_override = getattr(args, "project", None)
@@ -1162,8 +1193,8 @@ def main(argv: list[str]) -> int:
     # Load configuration aligned with active project
     try:
         cfg = MidevConfig.load(args.config, project_override=proj_override)
-        allow_ext = bool(getattr(args, "allow_external_output", False) or ("--allow-external-output" in unknown) or ("--allow-external-output" in argv))
-        allow_nonempty = bool(getattr(args, "allow_nonempty_output", False) or ("--allow-nonempty-output" in unknown) or ("--allow-nonempty-output" in argv))
+        allow_ext = bool(getattr(args, "allow_external_output", False))
+        allow_nonempty = bool(getattr(args, "allow_nonempty_output", False))
         apply_config(
             cfg,
             out_override=args.out,
@@ -1195,19 +1226,15 @@ def main(argv: list[str]) -> int:
         return 1
 
     cmd = args.command
-    if not cmd and argv:
-        first = argv[0]
-        if first in ("build", "validate", "new", "list", "palette", "watch", "doctor", "info", "studio", "preview", "project", "generate", "inspect"):
-            cmd = first
-            argv = argv[1:]
-        elif not first.startswith("-"):
-            cmd = "build"
+    if not cmd:
+        parser.print_help()
+        return 0
 
     if cmd == "list":
         return cmd_list(as_json=as_json)
     elif cmd == "inspect":
         import inspect_tool
-        recipe_target = getattr(args, "recipe", None) or (argv[0] if argv and not argv[0].startswith("-") else "player")
+        recipe_target = getattr(args, "recipe", "player")
         scale_val = getattr(args, "scale", 4)
         out_file_val = getattr(args, "out_file", None)
         return inspect_tool.cmd_inspect(recipe_target, scale=scale_val, out_file=out_file_val, as_json=as_json)
@@ -1224,7 +1251,7 @@ def main(argv: list[str]) -> int:
         return cmd_generate(gen_type, name=name, as_json=as_json)
     elif cmd in ("studio", "preview"):
         port = getattr(args, "port", 8080)
-        no_open = getattr(args, "no_open", False) or ("--no-open" in unknown)
+        no_open = getattr(args, "no_open", False)
         return cmd_studio(port=port, no_open=no_open)
     elif cmd == "doctor":
         return run_doctor(as_json=as_json)
@@ -1232,18 +1259,14 @@ def main(argv: list[str]) -> int:
         show_info(CONFIG, as_json=as_json)
         return 0
     elif cmd == "watch":
-        target = getattr(args, "recipe", None) or (argv[0] if argv and not argv[0].startswith("-") else None)
+        target = getattr(args, "recipe", None)
         return cmd_watch(target)
     elif cmd == "palette":
         action = getattr(args, "sub_action", "list")
         pal_target = getattr(args, "pal_name", None)
-        if not pal_target and unknown:
-            for u in unknown:
-                if not u.startswith("-"):
-                    if not action or action == "list":
-                        action = u
-                    else:
-                        pal_target = u
+        if action not in ("list", "inspect"):
+            pal_target = action
+            action = "inspect"
         if action == "inspect":
             if not pal_target:
                 if as_json:
@@ -1254,7 +1277,7 @@ def main(argv: list[str]) -> int:
             return cmd_palette_inspect(pal_target, as_json=as_json)
         return cmd_palette_list(as_json=as_json)
     elif cmd == "new":
-        name = getattr(args, "name", None) or (argv[0] if argv else None)
+        name = getattr(args, "name", None)
         template = getattr(args, "template", None)
         if not name:
             print("[artkit] Error: Recipe name is required. Usage: artkit new <name> [--template <type>]")
@@ -1262,11 +1285,9 @@ def main(argv: list[str]) -> int:
         return cmd_new(name, template_type=template)
     elif cmd == "build":
         target_recipes = getattr(args, "recipes", [])
-        if not target_recipes:
-            target_recipes = [a for a in unknown if not a.startswith("-")]
-        clean_flag = getattr(args, "clean", False) or ("--clean" in unknown) or ("--clean" in argv)
-        inc_flag = getattr(args, "incremental", False) or ("--incremental" in unknown) or ("-i" in unknown)
-        force_flag = getattr(args, "force", False) or ("--force" in unknown)
+        clean_flag = bool(getattr(args, "clean", False))
+        inc_flag = bool(getattr(args, "incremental", False))
+        force_flag = bool(getattr(args, "force", False))
         return cmd_build(target_recipes, clean=clean_flag, incremental=inc_flag, force=force_flag, as_json=as_json)
     elif cmd == "validate":
         target_dir = getattr(args, "target", None)

@@ -334,6 +334,29 @@ class TestRegressions(unittest.TestCase):
         with self.assertRaises(Exception):
             git_tool.run_git(["non-existent-subcommand-12345"])
 
+    # -------------------------------------------------------------------------
+    # Round 3: CLI Flag handling
+    # -------------------------------------------------------------------------
+    def test_flags_before_subcommand(self):
+        """Global flags passed before subcommand (e.g. midev --project pp build) must not be ignored."""
+        repo = self._get_temp_repo()
+        code, out, _ = run_cli(["--project", "demo_rpg", "build", "--json"], cwd=repo)
+        self.assertEqual(code, 0)
+        data = json.loads(out)
+        self.assertEqual(data.get("project"), "projects/demo_rpg", "--project before build was ignored!")
+
+    def test_unknown_flags_rejected(self):
+        """Unknown or misspelled flags like --clena must be rejected with non-zero exit."""
+        repo = self._get_temp_repo()
+        code, out, err = run_cli(["build", "--clena"], cwd=repo)
+        self.assertNotEqual(code, 0, "Unknown flag --clena should have caused non-zero exit code")
+
+        code_json, out_json, _ = run_cli(["build", "--clena", "--json"], cwd=repo)
+        self.assertNotEqual(code_json, 0)
+        data = json.loads(out_json)
+        self.assertEqual(data.get("status"), "error")
+        self.assertIn("unrecognized arguments", data["errors"][0]["error"])
+
 
 if __name__ == "__main__":
     unittest.main()
