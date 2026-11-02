@@ -22,6 +22,7 @@ from PIL import Image
 import artkit
 import projects
 from config import MidevConfig
+from manifest import Manifest
 from pixelkit import ROOT
 from safepath import is_within
 
@@ -45,83 +46,42 @@ def safe_resolve(base: Path, rel: str) -> Path | None:
         return candidate
     return None
 
-PRIMARY_ASSET_MAP: dict[str, str] = {
-    "player": "sprites/player",
-    "chests": "sprites/chest_wood",
-    "chest": "sprites/chest",
-    "basecamp": "sprites/basecamp_bed",
-    "terrain": "tiles/terrain",
-    "title": "backgrounds/title_sky",
-    "app_icon": "ui/icon_64",
-    "fauna": "sprites/fauna_bird",
-    "fish": "sprites/fish_swim",
-    "fishing_fx": "sprites/fishing_splash",
-    "trees": "sprites/trees",
-    "poi": "sprites/poi_campfire",
-    "ui": "ui/hud_frame",
-    "ui_crafting": "ui/panel_modal",
-    "ui_extra": "ui/joystick_base",
-    "aquarium_codex": "sprites/aquarium_tank_large",
-    "player_fishing": "sprites/player_fishing",
-    "char_hero": "sprites/hero",
-    "dungeon_tiles": "tiles/dungeon_tiles",
-    "magic_fx": "sprites/magic_fx",
-    "hud_kit": "ui/hud_kit",
-}
+def get_recipe_for_asset(name_or_id: str, out_dir: Path | None = None) -> str:
+    out = out_dir or artkit.CONFIG.output_dir
+    try:
+        manifest = Manifest(out / "manifest.json")
+        recipe = manifest.get_recipe_for_asset(name_or_id)
+        if recipe:
+            return recipe
+    except Exception:
+        pass
 
-
-def get_recipe_for_asset(name_or_id: str) -> str:
     name = Path(name_or_id).stem
     recipe_names = {p.stem for p in artkit.recipes()}
     if name in recipe_names:
         return name
 
-    if name.startswith("chest_"):
-        return "chests"
-    if name.startswith("basecamp_"):
-        return "basecamp"
-    if name.startswith("fauna_"):
-        return "fauna"
-    if name.startswith("fish_"):
-        return "fish"
-    if name.startswith("fishing_") or name == "fx":
-        return "fishing_fx"
-    if name.startswith("poi_"):
-        return "poi"
-    if name.startswith("title_"):
-        return "title"
-    if name.startswith("icon_"):
-        return "app_icon"
-    if name.startswith("codex_") or name.startswith("aquarium_"):
-        return "aquarium_codex"
-    if name in ("font", "hud_frame", "buttons", "items", "logo", "btn_rect", "prompt", "rarity_borders", "scrollbar", "gold_banner", "hint_meter"):
-        return "ui"
-    if name in ("panel_modal", "panel_tooltip", "tabs_crafting", "panel_inventory", "slot"):
-        return "ui_crafting"
-    if name in ("joystick_base", "joystick_knob", "status_icons"):
-        return "ui_extra"
-    if name == "dash_fx":
-        return "player"
-    if name in ("tree_giant", "decor"):
-        return "trees"
-    if name == "ping":
-        return "player_fishing"
-
-    for r in recipe_names:
+    for r in sorted(recipe_names):
         if name.startswith(r) or r.startswith(name):
             return r
     return name
 
 
-def find_primary_asset_for_recipe(recipe: str) -> str:
-    if recipe in PRIMARY_ASSET_MAP:
-        return PRIMARY_ASSET_MAP[recipe]
-    out = artkit.CONFIG.output_dir
+def find_primary_asset_for_recipe(recipe: str, out_dir: Path | None = None) -> str:
+    out = out_dir or artkit.CONFIG.output_dir
+    try:
+        manifest = Manifest(out / "manifest.json")
+        primary = manifest.find_primary_asset(recipe)
+        if primary:
+            return primary.asset_id
+    except Exception:
+        pass
+
     for cat in ("sprites", "tiles", "ui", "backgrounds"):
         if (out / cat / f"{recipe}.png").exists():
             return f"{cat}/{recipe}"
     for cat in ("sprites", "tiles", "ui", "backgrounds"):
-        matches = list((out / cat).glob(f"{recipe}*.png"))
+        matches = sorted(list((out / cat).glob(f"{recipe}*.png")))
         if matches:
             return f"{cat}/{matches[0].stem}"
     return f"sprites/{recipe}"
@@ -255,7 +215,8 @@ class StudioHandler(BaseHTTPRequestHandler):
         # Backward compatibility route for recipes
         if path.startswith("/api/recipe/"):
             recipe_name = path[len("/api/recipe/"):].strip()
-            primary_asset = find_primary_asset_for_recipe(recipe_name)
+            cfg = MidevConfig.load()
+            primary_asset = find_primary_asset_for_recipe(recipe_name, out_dir=cfg.output_dir)
             self.handle_get_asset(primary_asset, head_only=head_only)
             return
 
@@ -340,7 +301,8 @@ class StudioHandler(BaseHTTPRequestHandler):
         # Trigger Build
         if path.startswith("/api/build/"):
             target_name = path[len("/api/build/"):].strip()
-            recipe_name = get_recipe_for_asset(target_name)
+            cfg = MidevConfig.load()
+            recipe_name = get_recipe_for_asset(target_name, out_dir=cfg.output_dir)
             print(f"[studio] Triggering build for: {recipe_name} (target: {target_name})")
             ret = artkit.cmd_build([recipe_name])
             broadcast_event({"type": "reload", "recipe": recipe_name, "target": target_name})
@@ -355,41 +317,75 @@ class StudioHandler(BaseHTTPRequestHandler):
         artkit.apply_config(cfg)
         out_dir = cfg.output_dir
 
+        manifest_path = out_dir / "manifest.json"
+        manifest = Manifest(manifest_path)
+
         # Ensure output directory has assets; auto-build if completely empty
         png_list = list(out_dir.rglob("*.png")) if out_dir.exists() else []
-        if not png_list:
+        if not png_list and not manifest.entries:
             print(f"[studio] Output directory {out_dir} empty, auto-building active project recipes...")
             artkit.cmd_build([])
+            manifest.load()
             png_list = list(out_dir.rglob("*.png")) if out_dir.exists() else []
 
         assets = []
-        for p in sorted(png_list):
-            rel = p.relative_to(out_dir)
-            cat = rel.parts[0]
-            name = rel.stem
-            asset_id = f"{cat}/{name}"
-            recipe = get_recipe_for_asset(name)
+        if manifest.entries:
+            for asset_id, entry in sorted(manifest.entries.items()):
+                png_rel = None
+                for f in entry.files:
+                    if f.endswith(".png"):
+                        png_rel = f
+                        break
+                if not png_rel:
+                    png_rel = f"{entry.category}/{Path(entry.asset_id).stem}.png"
 
-            json_file = p.with_suffix(".json")
-            has_meta = json_file.exists()
-            anims_list = []
-            if has_meta:
-                try:
-                    mdata = json.loads(json_file.read_text(encoding="utf-8"))
-                    anims_list = list(mdata.get("animations", {}).keys())
-                except Exception:
-                    pass
+                png_file = out_dir / png_rel
+                if not png_file.exists():
+                    continue
 
-            assets.append({
-                "id": asset_id,
-                "name": name,
-                "category": cat,
-                "recipe": recipe,
-                "imageUrl": f"/assets/{rel.as_posix()}",
-                "metaUrl": f"/assets/{rel.with_suffix('.json').as_posix()}" if has_meta else None,
-                "hasMeta": has_meta,
-                "animations": anims_list,
-            })
+                json_file = png_file.with_suffix(".json")
+                has_meta = json_file.exists()
+
+                assets.append({
+                    "id": entry.asset_id,
+                    "name": Path(entry.asset_id).stem,
+                    "category": entry.category,
+                    "recipe": entry.recipe,
+                    "imageUrl": f"/assets/{png_rel}",
+                    "metaUrl": f"/assets/{Path(png_rel).with_suffix('.json').as_posix()}" if has_meta else None,
+                    "hasMeta": has_meta,
+                    "animations": entry.anims,
+                })
+        else:
+            for p in sorted(png_list):
+                if p.name.startswith("."):
+                    continue
+                rel = p.relative_to(out_dir)
+                cat = rel.parts[0] if len(rel.parts) > 1 else "sprites"
+                name = rel.stem
+                asset_id = f"{cat}/{name}"
+                recipe = get_recipe_for_asset(name, out_dir=out_dir)
+
+                json_file = p.with_suffix(".json")
+                has_meta = json_file.exists()
+                anims_list = []
+                if has_meta:
+                    try:
+                        mdata = json.loads(json_file.read_text(encoding="utf-8"))
+                        anims_list = list(mdata.get("animations", {}).keys())
+                    except Exception:
+                        pass
+
+                assets.append({
+                    "id": asset_id,
+                    "name": name,
+                    "category": cat,
+                    "recipe": recipe,
+                    "imageUrl": f"/assets/{rel.as_posix()}",
+                    "metaUrl": f"/assets/{rel.with_suffix('.json').as_posix()}" if has_meta else None,
+                    "hasMeta": has_meta,
+                    "animations": anims_list,
+                })
 
         recipes_list = [p.stem for p in artkit.recipes()]
         active_proj = projects.get_active_project()
@@ -430,7 +426,7 @@ class StudioHandler(BaseHTTPRequestHandler):
         meta_file = out_dir / cat / f"{name}.json"
         rel_png = f"{cat}/{name}.png"
 
-        recipe_name = get_recipe_for_asset(name)
+        recipe_name = get_recipe_for_asset(name, out_dir=out_dir)
 
         if not png_file.exists():
             artkit.cmd_build([recipe_name])

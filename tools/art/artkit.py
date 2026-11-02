@@ -5,6 +5,7 @@ Supports multi-project workspaces, procedural generators, incremental cache, and
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import shutil
@@ -20,6 +21,7 @@ import projects
 from cache import BuildCache
 from config import MidevConfig
 from diagnostics import run_doctor, show_info
+from manifest import Manifest, AssetEntry
 from generators import (
     AutotileConfig,
     AutotileGenerator,
@@ -232,12 +234,30 @@ def _clean_recipe_output(stem: str, target_dir: Path):
 def _find_recipe_outputs(stem: str, *target_dirs: Path) -> list[Path]:
     """Find all output files created for recipe in target directories."""
     outputs: list[Path] = []
+    seen = set()
+
+    for d in target_dirs:
+        manifest_file = d / "manifest.json"
+        if manifest_file.exists():
+            try:
+                m = Manifest(manifest_file)
+                for rel_f in m.get_files_for_recipe(stem):
+                    p = (d / rel_f).resolve()
+                    if p.exists() and p not in seen:
+                        seen.add(p)
+                        outputs.append(p)
+            except Exception:
+                pass
+
     for d in target_dirs:
         if d.exists():
-            for f in d.rglob("*"):
+            for f in sorted(d.rglob("*")):
                 if f.is_file() and not f.name.startswith("."):
-                    if f.stem == stem or f.stem.startswith(f"{stem}_") or f.name.startswith(f"{stem}."):
-                        outputs.append(f)
+                    res_f = f.resolve()
+                    if res_f not in seen:
+                        if f.stem == stem or f.stem.startswith(f"{stem}_") or f.name.startswith(f"{stem}."):
+                            seen.add(res_f)
+                            outputs.append(res_f)
     return outputs
 
 
@@ -354,8 +374,13 @@ def build_recipes(
     cache_file = out / ".midev-cache.json"
     cache = BuildCache(cache_file=cache_file, project_id=proj_id)
 
+    manifest_file = out / "manifest.json"
+    manifest = Manifest(manifest_file)
+
     if clean:
         cache.clear()
+        manifest.entries.clear()
+        manifest.save()
         try:
             safe_clean_output_dir(out)
             safe_clean_output_dir(prev)
@@ -393,14 +418,57 @@ def build_recipes(
         pass
 
     for p in todo:
+        manifest.load()
+        old_files = manifest.remove_recipe(p.stem)
+        for rel_f in old_files:
+            target_f = out / rel_f
+            if target_f.exists():
+                try:
+                    target_f.unlink()
+                except OSError:
+                    pass
+        manifest.save()
+
         _clean_recipe_output(p.stem, ctx.assets)
         _clean_recipe_output(p.stem, ctx.preview)
 
         pixelkit.reset_build_stats()
+        pixelkit.set_current_recipe(p.stem, output_dir=out)
         try:
             mod = load(p)
             mod.build(ctx)
             recipe_outputs = _find_recipe_outputs(p.stem, ctx.assets, ctx.preview)
+
+            # Ensure any non-SheetBuilder PNGs created in ctx.assets are tracked in manifest
+            manifest.load()
+            for out_f in recipe_outputs:
+                if out_f.suffix.lower() == ".png" and is_within(out_f, ctx.assets):
+                    rel_p = out_f.relative_to(ctx.assets).as_posix()
+                    existing_entries = manifest.get_assets_for_recipe(p.stem)
+                    already_tracked = any(rel_p in e.files for e in existing_entries)
+                    if not already_tracked:
+                        cat = out_f.parent.relative_to(ctx.assets).as_posix() if out_f.parent != ctx.assets else "assets"
+                        asset_id = f"{cat}/{out_f.stem}"
+                        try:
+                            with Image.open(out_f) as im:
+                                w, h = im.size
+                        except Exception:
+                            w, h = 0, 0
+                        f_hash = hashlib.sha256(out_f.read_bytes()).hexdigest() if out_f.exists() else ""
+                        manifest.add_asset(
+                            AssetEntry(
+                                asset_id=asset_id,
+                                recipe=p.stem,
+                                category=cat,
+                                files=[rel_p],
+                                frame_size=[w, h],
+                                origin=[w // 2, h // 2],
+                                anims=["default"],
+                                hash=f_hash,
+                            )
+                        )
+            manifest.save()
+
             cache.record(p, palette=pal_key, exporters=exps, palette_path=pal_path, output_files=recipe_outputs)
             built.append(p.stem)
 
@@ -419,8 +487,20 @@ def build_recipes(
                 "error": str(e),
                 "traceback": tb,
             })
+            manifest.load()
+            failed_files = manifest.remove_recipe(p.stem)
+            for rel_f in failed_files:
+                target_f = out / rel_f
+                if target_f.exists():
+                    try:
+                        target_f.unlink()
+                    except OSError:
+                        pass
+            manifest.save()
             _clean_recipe_output(p.stem, ctx.assets)
             _clean_recipe_output(p.stem, ctx.preview)
+        finally:
+            pixelkit.set_current_recipe(None, None)
 
     cache.save()
 

@@ -16,8 +16,9 @@ from __future__ import annotations
 import json
 import math
 import io
+import hashlib
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Any, Iterable, Sequence
 
 from PIL import Image, ImageDraw
 
@@ -67,6 +68,20 @@ def record_snap_stats(stats: Any) -> None:
     elif isinstance(stats, dict):
         BUILD_STATS["snapped_pixels"] += stats.get("snapped_pixels", 0)
         BUILD_STATS["binarized_alpha"] += stats.get("binarized_alpha", 0)
+
+
+_CURRENT_RECIPE: str | None = None
+_CURRENT_OUTPUT_DIR: Path | None = None
+
+
+def set_current_recipe(recipe: str | None, output_dir: Path | None = None) -> None:
+    global _CURRENT_RECIPE, _CURRENT_OUTPUT_DIR
+    _CURRENT_RECIPE = recipe
+    _CURRENT_OUTPUT_DIR = Path(output_dir).resolve() if output_dir else None
+
+
+def get_current_recipe() -> str | None:
+    return _CURRENT_RECIPE
 
 
 
@@ -293,6 +308,7 @@ class SheetBuilder:
         return self
 
     def save(self, out_dir: Path, formats: Sequence[str] | None = None) -> Path:
+        out_dir = Path(out_dir).resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
         cols = max(len(a[1]) for a in self.anims)
         sheet = Image.new("RGBA", (cols * self.fw, len(self.anims) * self.fh), (0, 0, 0, 0))
@@ -302,6 +318,7 @@ class SheetBuilder:
         png = out_dir / f"{self.name}.png"
         sheet.save(png)
 
+        created_files = [png]
         try:
             from exporters import SheetInfo, AnimationData, run_exporters
             anim_data = [
@@ -319,14 +336,64 @@ class SheetBuilder:
                 image_path=png,
             )
             target_formats = formats or ACTIVE_EXPORTERS
-            run_exporters(info, out_dir, target_formats)
+            exp_files = run_exporters(info, out_dir, target_formats)
+            created_files.extend(exp_files)
         except Exception as e:
             # Fallback to basic JSON if exporter subsystem fails
             meta = {"name": self.name, "frameWidth": self.fw, "frameHeight": self.fh,
                     "originX": self.origin[0], "originY": self.origin[1], "animations": {}}
             for row, (anim, frames, fps, loop) in enumerate(self.anims):
                 meta["animations"][anim] = {"row": row, "frames": len(frames), "fps": fps, "loop": loop}
-            (out_dir / f"{self.name}.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            fallback_json = out_dir / f"{self.name}.json"
+            fallback_json.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+            created_files.append(fallback_json)
+
+        # Record asset to build manifest
+        try:
+            output_root = _CURRENT_OUTPUT_DIR
+            if not output_root:
+                if out_dir.name in ("sprites", "tiles", "ui", "backgrounds"):
+                    output_root = out_dir.parent
+                else:
+                    output_root = out_dir
+
+            rel_category = ""
+            try:
+                rel_category = out_dir.relative_to(output_root).as_posix()
+            except ValueError:
+                rel_category = out_dir.name
+
+            category = rel_category if rel_category and rel_category != "." else out_dir.name
+            asset_id = f"{category}/{self.name}"
+
+            rel_files = []
+            for f in created_files:
+                try:
+                    rel_files.append(f.resolve().relative_to(output_root).as_posix())
+                except ValueError:
+                    rel_files.append(f.name)
+
+            asset_hash = hashlib.sha256(png.read_bytes()).hexdigest() if png.exists() else ""
+            recipe_name = _CURRENT_RECIPE or self.name
+
+            from manifest import Manifest, AssetEntry
+            manifest = Manifest(output_root / "manifest.json")
+            manifest.add_asset(
+                AssetEntry(
+                    asset_id=asset_id,
+                    recipe=recipe_name,
+                    category=category,
+                    files=rel_files,
+                    frame_size=[self.fw, self.fh],
+                    origin=list(self.origin),
+                    anims=[a[0] for a in self.anims],
+                    hash=asset_hash,
+                )
+            )
+            manifest.save()
+        except Exception:
+            pass
+
         return png
 
     def preview_gif(self, out_dir: Path, scale: int = 4):

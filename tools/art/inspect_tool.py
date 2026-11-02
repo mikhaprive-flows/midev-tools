@@ -19,6 +19,7 @@ import artkit
 import pixelkit
 import projects
 from config import MidevConfig
+from manifest import Manifest
 
 
 def _get_font(size: int = 12) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -61,17 +62,33 @@ def generate_inspection_sheet(
     # 2. Locate primary spritesheet and metadata
     target_png = None
     target_json = None
-    for cat in ("sprites", "tiles", "ui", "backgrounds"):
-        candidate_png = out_dir / cat / f"{recipe_name}.png"
-        if candidate_png.exists():
-            target_png = candidate_png
-            target_json = candidate_png.with_suffix(".json")
-            break
+
+    manifest = Manifest(out_dir / "manifest.json")
+    primary_entry = manifest.find_primary_asset(recipe_name)
+    if primary_entry:
+        for f in primary_entry.files:
+            p = out_dir / f
+            if p.suffix.lower() == ".png" and p.exists() and not target_png:
+                target_png = p
+            elif p.suffix.lower() == ".json" and p.exists() and not target_json:
+                target_json = p
+        if not target_png:
+            candidate = out_dir / primary_entry.category / f"{Path(primary_entry.asset_id).stem}.png"
+            if candidate.exists():
+                target_png = candidate
+                target_json = candidate.with_suffix(".json")
 
     if not target_png:
-        # Check for prefixed matches
         for cat in ("sprites", "tiles", "ui", "backgrounds"):
-            matches = list((out_dir / cat).glob(f"{recipe_name}*.png"))
+            candidate_png = out_dir / cat / f"{recipe_name}.png"
+            if candidate_png.exists():
+                target_png = candidate_png
+                target_json = candidate_png.with_suffix(".json")
+                break
+
+    if not target_png:
+        for cat in ("sprites", "tiles", "ui", "backgrounds"):
+            matches = sorted(list((out_dir / cat).glob(f"{recipe_name}*.png")))
             if matches:
                 target_png = matches[0]
                 target_json = matches[0].with_suffix(".json")
@@ -88,12 +105,25 @@ def generate_inspection_sheet(
         except Exception:
             pass
 
-    fw = meta.get("frameWidth", sheet_img.width)
-    fh = meta.get("frameHeight", sheet_img.height)
-    ox = meta.get("originX", fw // 2)
-    oy = meta.get("originY", fh - 2)
+    if primary_entry and primary_entry.frame_size and primary_entry.frame_size[0] > 0:
+        fw = primary_entry.frame_size[0]
+        fh = primary_entry.frame_size[1]
+    else:
+        fw = meta.get("frameWidth", sheet_img.width)
+        fh = meta.get("frameHeight", sheet_img.height)
+
+    if primary_entry and primary_entry.origin and primary_entry.origin != [0, 0]:
+        ox = primary_entry.origin[0]
+        oy = primary_entry.origin[1]
+    else:
+        ox = meta.get("originX", fw // 2)
+        oy = meta.get("originY", fh - 2)
+
     anims = meta.get("animations", {})
-    if not anims:
+    if not anims and primary_entry and primary_entry.anims:
+        anims = {anim_name: {"row": i, "frames": max(1, sheet_img.width // fw), "fps": 6, "loop": True}
+                 for i, anim_name in enumerate(primary_entry.anims)}
+    elif not anims:
         anims = {"default": {"row": 0, "frames": max(1, sheet_img.width // fw), "fps": 6, "loop": True}}
 
     # 3. Extract unique non-transparent colors
