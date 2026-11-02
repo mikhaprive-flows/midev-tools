@@ -47,6 +47,23 @@ Every sprite, animation frame, and outline is generated 100% deterministically f
 
 ---
 
+## 🎨 A Note on Learning Art & Rapid Prototyping
+
+> **We wholeheartedly encourage every game developer to learn and practice creating their own art.**
+
+Learning traditional pixel art, color theory, silhouette design, and animation timing (using wonderful tools like Aseprite, Libresprite, or Krita) is an immensely rewarding and irreplaceable craft. There is no true substitute for hand-crafted artistic vision and personal expression in game development.
+
+**However, time is often the scarcest resource for indie developers.**
+
+When you are juggling game mechanics, engine architecture, physics, sound design, and narrative, you might not have the hours or weeks needed to hand-draw 12-track character rigs, 47 canonical autotiles, 9-slice UI kits, and particle VFX just to test a concept.
+
+**`midev-tools` is built to be your base frame and prototyping scaffold:**
+- **Jumpstart Your Prototype**: Get coherent, palette-perfect, engine-ready spritesheets (`.tres`, TexturePacker JSON, slices) running in Godot or Unity on Day 1.
+- **Focus on Gameplay First**: Validate your core gameplay loop, collision bounds, and mechanics without getting blocked by missing art.
+- **Iterate and Replace Gracefully**: Because all generated assets adhere to strict frame sizes, pivot origins, and palette rules, you can treat them as a clean foundation—customizing the Python recipes or swapping in your own hand-drawn artwork later without breaking your engine setup!
+
+---
+
 ## Key Features
 - **100% Pure Python**: Fully cross-platform (Windows, Linux, macOS) with auto-venv bootstrapping and zero OS-shell scripts.
 - **Multi-Project Workspace Architecture**:
