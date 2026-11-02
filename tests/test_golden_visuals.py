@@ -50,8 +50,10 @@ class TestGoldenVisuals(unittest.TestCase):
         alpha = im.getchannel("A")
         self.assertFalse(any(0 < a < 255 for a in alpha.tobytes()))
 
-        digest = hashlib.sha256(png_path.read_bytes()).hexdigest()
-        golden_digest = "a0b902a432f4e2bbb6f7edec2835a7c52d67c80283c7fb37a72b0cca22b6309a"
+        # Compare raw pixel bytes (decompressed RGBA) rather than compressed PNG file bytes
+        # to guarantee cross-platform determinism regardless of OS-specific zlib deflater differences
+        digest = hashlib.sha256(im.tobytes()).hexdigest()
+        golden_digest = "24ff47a0956376c9be7b3f37de34d39c2a7936aad25e718dbbb22f1abf043f0c"
         self.assertEqual(digest, golden_digest)
 
     def test_golden_autotile_47_visuals(self):
@@ -70,8 +72,8 @@ class TestGoldenVisuals(unittest.TestCase):
         self.assertEqual(len(sb.extra_meta.get("tiles", [])), 47)
         self.assertEqual(len(sb.extra_meta.get("mask_to_index", {})), 256)
 
-        digest = hashlib.sha256(png_path.read_bytes()).hexdigest()
-        golden_digest = "0730510286455a610e252b213d2889113a8f4cb9426adb54acdf0a4042c31d99"
+        digest = hashlib.sha256(im.tobytes()).hexdigest()
+        golden_digest = "ee37916ff23e2ac980efa18d66c8b786155bc9ba384309ed1681d85c674d3fd0"
         self.assertEqual(digest, golden_digest)
 
     def test_golden_vfx_explosion_visuals(self):
@@ -106,6 +108,7 @@ class TestGoldenVisuals(unittest.TestCase):
         p1 = sb1.save(self.tmp_dir / "r1", formats=["native"])
         p2 = sb2.save(self.tmp_dir / "r2", formats=["native"])
 
+        self.assertEqual(Image.open(p1).tobytes(), Image.open(p2).tobytes())
         self.assertEqual(p1.read_bytes(), p2.read_bytes())
 
 
