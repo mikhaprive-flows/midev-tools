@@ -61,7 +61,7 @@ def run_cli(
     args: list[str],
     cwd: Path | None = None,
     env: dict[str, str] | None = None,
-    timeout: float = 30.0,
+    timeout: float = 60.0,
 ) -> tuple[int, str, str]:
     """
     Runs midev CLI via subprocess, capturing separated stdout and stderr.

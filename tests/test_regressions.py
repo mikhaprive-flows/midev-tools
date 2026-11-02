@@ -456,6 +456,30 @@ class TestRegressions(unittest.TestCase):
         self.assertEqual(data.get("status"), "ok")
         self.assertIn("noisy", data.get("built", []))
 
+    def test_recipe_module_level_print_does_not_corrupt_json_stdout(self):
+        """Top-level recipe prints executed during module import must be redirected to stderr."""
+        repo = self._get_temp_repo()
+        import_noisy = repo / "samples" / "fisharium" / "recipes" / "import_noisy.py"
+        import_noisy.write_text(
+            'print("IMPORT-TIME PRINT FROM RECIPE")\n'
+            'from pixelkit import SheetBuilder, Canvas\n'
+            'def build(ctx):\n'
+            '    sb = SheetBuilder("import_noisy", 16, 16)\n'
+            '    c = Canvas(16, 16)\n'
+            '    sb.add("idle", [c])\n'
+            '    sb.save(ctx.sprites)\n',
+            encoding="utf-8",
+        )
+        code, out, err = run_cli(["build", "import_noisy", "--json"], cwd=repo)
+        self.assertEqual(code, 0, f"Build failed: {err}")
+        self.assertIn("IMPORT-TIME PRINT FROM RECIPE", err, "Module-level recipe print should be routed to stderr")
+        try:
+            data = json.loads(out)
+        except json.JSONDecodeError as e:
+            self.fail(f"stdout is not valid JSON: {e}\nstdout was:\n{out}")
+        self.assertEqual(data.get("status"), "ok")
+        self.assertIn("import_noisy", data.get("built", []))
+
     def test_character_config_dimensions_validation(self):
         """CharacterConfig must reject width <= 0 and height <= 0 with ValueError."""
         from generators.character import CharacterConfig

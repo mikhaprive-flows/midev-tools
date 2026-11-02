@@ -167,7 +167,8 @@ def load(path: Path):
         raise ImportError(f"Cannot load recipe at {path}")
     mod = importlib.util.module_from_spec(spec)
     sys.modules[name] = mod
-    spec.loader.exec_module(mod)
+    with contextlib.redirect_stdout(sys.stderr):
+        spec.loader.exec_module(mod)
     return mod
 
 
