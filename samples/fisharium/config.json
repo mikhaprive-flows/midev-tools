@@ -1,7 +1,7 @@
 {
   "name": "fisharium",
   "title": "Fisharium (Official Sample)",
-  "version": "1.1.0",
+  "version": "1.0.0",
   "description": "Cozy pixel-art fishing RPG asset collection (Fisharium)",
   "palette": "fisharium32",
   "output_dir": "export/samples/fisharium/assets",
