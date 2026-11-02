@@ -1,3 +1,6 @@
+# Local state
+.midev/
+
 # Secrets & Credentials
 git_full_access_token.txt
 *.token

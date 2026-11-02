@@ -637,7 +637,7 @@ def cmd_project(
             return 1
 
     elif action == "info":
-        active = projects.get_active_project() if not name else projects.set_active_project(name)
+        active = projects.get_project_by_name(name) if name else projects.get_active_project()
         if as_json:
             print(json.dumps({"status": "ok", "project": active.to_dict()}, indent=2))
             return 0
@@ -869,16 +869,17 @@ def main(argv: list[str]) -> int:
     parser = build_parser()
     args, unknown = parser.parse_known_args(argv)
 
-    # If --project was specified, switch active project temporarily
-    if getattr(args, "project", None):
+    # If --project was specified, set in-memory project override (does not mutate config on disk)
+    proj_override = getattr(args, "project", None)
+    if proj_override:
         try:
-            projects.set_active_project(args.project)
+            projects.set_project_override(proj_override)
         except Exception as e:
             print(f"[artkit] Error selecting project: {e}")
             return 1
 
     # Load configuration aligned with active project
-    cfg = MidevConfig.load(args.config)
+    cfg = MidevConfig.load(args.config, project_override=proj_override)
     apply_config(cfg, out_override=args.out, preview_override=args.preview, palette_override=args.palette, format_override=args.format)
 
     as_json = bool(getattr(args, "json", False) or ("--json" in unknown) or ("--json" in argv))

@@ -5,13 +5,74 @@ Manages samples, user projects, isolation, and configuration routing.
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from config import ROOT_DIR, MidevConfig
-from safepath import assert_safe_output_dir, is_within, validate_name
+from config import ROOT_DIR, MidevConfig, resolve_config
+from safepath import assert_safe_output_dir, file_lock, is_within, validate_name
+
+_PROJECT_OVERRIDE: str | None = None
+
+
+def set_project_override(name_or_id: str | None) -> str | None:
+    """Set process-local in-memory active project override without modifying disk state."""
+    global _PROJECT_OVERRIDE
+    if not name_or_id:
+        _PROJECT_OVERRIDE = None
+        return None
+    proj = get_project_by_name(name_or_id)
+    _PROJECT_OVERRIDE = proj.id
+    return proj.id
+
+
+def get_project_override() -> str | None:
+    """Get process-local in-memory active project override if any."""
+    return _PROJECT_OVERRIDE
+
+
+def get_state_file_path() -> Path:
+    return ROOT_DIR / ".midev" / "state.json"
+
+
+def read_active_state() -> dict[str, Any]:
+    sf = get_state_file_path()
+    if sf.exists():
+        try:
+            txt = sf.read_text(encoding="utf-8")
+            if txt.strip():
+                return json.loads(txt)
+        except Exception:
+            try:
+                corrupt_path = sf.with_name(f"{sf.name}.corrupt")
+                shutil.move(str(sf), str(corrupt_path))
+            except Exception:
+                pass
+    return {}
+
+
+def write_active_state(data: dict[str, Any]) -> None:
+    sf = get_state_file_path()
+    lock_file = sf.with_name("state.lock")
+    sf.parent.mkdir(parents=True, exist_ok=True)
+    with file_lock(lock_file):
+        tmp_file = sf.with_suffix(".tmp")
+        tmp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp_file, sf)
+
+
+def get_active_project_id() -> str:
+    """Determine current active project ID from override, state.json, or master config."""
+    if _PROJECT_OVERRIDE:
+        return _PROJECT_OVERRIDE
+    state = read_active_state()
+    if "active_project" in state and isinstance(state["active_project"], str):
+        return state["active_project"]
+    master = read_master_config()
+    return master.get("active_project", "samples/fisharium")
+
 
 
 @dataclass
@@ -72,15 +133,16 @@ def read_master_config() -> dict[str, Any]:
 
 
 def write_master_config(data: dict[str, Any]) -> None:
-    cfg_file = get_master_config_path()
-    cfg_file.parent.mkdir(parents=True, exist_ok=True)
-    cfg_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    """
+    Deprecated: master configuration file config/midev.config.json is strictly read-only.
+    Active project state is isolated to .midev/state.json.
+    """
+    pass
 
 
-def discover_projects() -> list[ProjectInfo]:
+def discover_projects(active_id_override: str | None = None) -> list[ProjectInfo]:
     """Scan samples/ and projects/ for valid projects."""
-    master = read_master_config()
-    active_id = master.get("active_project", "samples/fisharium")
+    active_id = active_id_override or get_active_project_id()
 
     results: list[ProjectInfo] = []
 
@@ -189,7 +251,8 @@ def get_active_project() -> ProjectInfo:
     return projects[0]
 
 
-def set_active_project(name_or_id: str) -> ProjectInfo:
+def get_project_by_name(name_or_id: str) -> ProjectInfo:
+    """Find a project by ID or directory name without altering active state."""
     projects = discover_projects()
     target = name_or_id.lower().strip()
 
@@ -210,11 +273,19 @@ def set_active_project(name_or_id: str) -> ProjectInfo:
             f"Please specify the full project ID (e.g. 'projects/{target}' or 'samples/{target}')."
         )
 
-    chosen = matched[0]
-    master = read_master_config()
-    master["active_project"] = chosen.id
-    write_master_config(master)
+    return matched[0]
 
+
+def set_active_project(name_or_id: str, persist: bool = True) -> ProjectInfo:
+    chosen = get_project_by_name(name_or_id)
+    if persist:
+        write_active_state({"active_project": chosen.id})
+        global _PROJECT_OVERRIDE
+        _PROJECT_OVERRIDE = None
+    else:
+        set_project_override(chosen.id)
+
+    projects = discover_projects()
     for p in projects:
         p.is_active = (p.id == chosen.id)
 
@@ -389,14 +460,8 @@ def build(ctx):
         (recipes_dir / "starter_coin.py").write_text(sample_code, encoding="utf-8")
 
 
-def get_active_midev_config() -> MidevConfig:
+def get_active_midev_config(project_override: str | None = None) -> MidevConfig:
     """Build a MidevConfig object aligned with the active project."""
-    active = get_active_project()
-    cfg = MidevConfig.load()
-    cfg.name = active.name
-    cfg.recipes_dir = active.recipes_dir
-    cfg.output_dir = active.output_dir
-    cfg.previews_dir = active.previews_dir
-    cfg.palette = active.palette
-    cfg.exporters = active.exporters
-    return cfg
+    override = project_override or get_project_override()
+    return resolve_config(project_override=override)
+

@@ -3,7 +3,9 @@ Path and name validation utilities to prevent directory traversal and injection 
 """
 from __future__ import annotations
 
+import contextlib
 import re
+import time
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -76,3 +78,59 @@ def safe_clean_output_dir(d: Path, allow_external: bool = False):
                     child.unlink()
                 except OSError:
                     pass
+
+
+@contextlib.contextmanager
+def file_lock(lock_path: Path, timeout: float = 5.0):
+    """
+    Cross-platform file lock context manager with timeout.
+    Uses msvcrt on Windows and fcntl on Unix.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    start_time = time.time()
+    with open(lock_path, "a+") as f:
+        is_locked = False
+        try:
+            import msvcrt
+            while True:
+                try:
+                    f.seek(0)
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    is_locked = True
+                    break
+                except OSError:
+                    if time.time() - start_time > timeout:
+                        break
+                    time.sleep(0.05)
+            try:
+                yield
+            finally:
+                if is_locked:
+                    try:
+                        f.seek(0)
+                        msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+                    except OSError:
+                        pass
+        except ImportError:
+            try:
+                import fcntl
+                while True:
+                    try:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        is_locked = True
+                        break
+                    except OSError:
+                        if time.time() - start_time > timeout:
+                            break
+                        time.sleep(0.05)
+                try:
+                    yield
+                finally:
+                    if is_locked:
+                        try:
+                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                        except OSError:
+                            pass
+            except ImportError:
+                yield
+

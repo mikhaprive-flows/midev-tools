@@ -245,17 +245,23 @@ class MCPServer:
                 if name == "midev_list_recipes":
                     proj_arg = args.get("project")
                     if proj_arg:
-                        projects.set_active_project(proj_arg)
-                        self.cfg = MidevConfig.load()
-                        artkit.apply_config(self.cfg)
-                    active = projects.get_active_project()
-                    recs = [p.stem for p in artkit.recipes()]
-                    res_data = {
-                        "activeProject": active.to_dict(),
-                        "recipes": recs,
-                        "total": len(recs),
-                        "palette": self.cfg.palette,
-                    }
+                        target = projects.get_project_by_name(proj_arg)
+                        target_recs = [p.stem for p in target.recipes_dir.glob("*.py") if not p.name.startswith("_")] if target.recipes_dir.exists() else []
+                        res_data = {
+                            "activeProject": target.to_dict(),
+                            "recipes": target_recs,
+                            "total": len(target_recs),
+                            "palette": target.palette,
+                        }
+                    else:
+                        active = projects.get_active_project()
+                        recs = [p.stem for p in artkit.recipes()]
+                        res_data = {
+                            "activeProject": active.to_dict(),
+                            "recipes": recs,
+                            "total": len(recs),
+                            "palette": self.cfg.palette,
+                        }
                     self.send_tool_result(req_id, res_data)
 
                 elif name == "midev_build_recipe":
