@@ -48,6 +48,28 @@ def set_active_palette(name_or_path: str | Path) -> Palette:
     return PAL
 
 
+BUILD_STATS: dict[str, int] = {"snapped_pixels": 0, "binarized_alpha": 0}
+
+
+def reset_build_stats() -> None:
+    BUILD_STATS["snapped_pixels"] = 0
+    BUILD_STATS["binarized_alpha"] = 0
+
+
+def get_build_stats() -> dict[str, int]:
+    return dict(BUILD_STATS)
+
+
+def record_snap_stats(stats: Any) -> None:
+    if hasattr(stats, "snapped_pixels"):
+        BUILD_STATS["snapped_pixels"] += stats.snapped_pixels
+        BUILD_STATS["binarized_alpha"] += stats.binarized_alpha
+    elif isinstance(stats, dict):
+        BUILD_STATS["snapped_pixels"] += stats.get("snapped_pixels", 0)
+        BUILD_STATS["binarized_alpha"] += stats.get("binarized_alpha", 0)
+
+
+
 # ---------------------------------------------------------------- raster canvas
 class Canvas:
     """Integer-pixel drawing surface. Colors may be palette names ('skin'), '#rrggbb' or RGBA."""
@@ -181,7 +203,11 @@ class Canvas:
         return self
 
     def done(self) -> Image.Image:
-        return PAL.snap(self.img)
+        if PAL:
+            img, stats = PAL.snap(self.img, return_stats=True)
+            record_snap_stats(stats)
+            return img
+        return self.img
 
     def save_png(self, path: Path | str) -> Path:
         """Save canvas directly to PNG with active palette snapping."""
@@ -244,9 +270,23 @@ class SheetBuilder:
         self.name, self.fw, self.fh = name, fw, fh
         self.origin = origin or (fw // 2, fh - 2)  # feet position, used by the game for y-sorting
         self.anims: list[tuple[str, list[Image.Image], float, bool]] = []
+        self.snapped_pixels: int = 0
+        self.binarized_alpha: int = 0
 
     def add(self, anim: str, frames: Iterable[Image.Image | Canvas], fps: float = 8, loop: bool = True):
-        fr = [f.done() if isinstance(f, Canvas) else f for f in frames]
+        fr: list[Image.Image] = []
+        for f in frames:
+            if isinstance(f, Canvas):
+                fr.append(f.done())
+            else:
+                if PAL:
+                    img, stats = PAL.snap(f, return_stats=True)
+                    record_snap_stats(stats)
+                    self.snapped_pixels += stats.snapped_pixels
+                    self.binarized_alpha += stats.binarized_alpha
+                    fr.append(img)
+                else:
+                    fr.append(f)
         for f in fr:
             assert f.size == (self.fw, self.fh), f"{self.name}/{anim}: frame {f.size} != {(self.fw, self.fh)}"
         self.anims.append((anim, fr, fps, loop))

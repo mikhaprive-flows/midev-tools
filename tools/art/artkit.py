@@ -199,6 +199,7 @@ class BuildResult:
     project: str
     built: list[str] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    warnings: list[dict[str, Any]] = field(default_factory=list)
     errors: list[dict[str, str]] = field(default_factory=list)
     validation: dict[str, Any] = field(default_factory=dict)
 
@@ -208,9 +209,11 @@ class BuildResult:
             "project": self.project,
             "built": self.built,
             "skipped": self.skipped,
+            "warnings": self.warnings,
             "errors": self.errors,
             "validation": self.validation,
         }
+
 
 
 def _clean_recipe_output(stem: str, target_dir: Path):
@@ -325,6 +328,7 @@ def build_recipes(
     all_dict = {p.stem: p for p in all_recipes}
     todo: list[Path] = []
     errors: list[dict[str, str]] = []
+    warnings: list[dict[str, Any]] = []
     built: list[str] = []
     skipped: list[str] = []
 
@@ -392,12 +396,22 @@ def build_recipes(
         _clean_recipe_output(p.stem, ctx.assets)
         _clean_recipe_output(p.stem, ctx.preview)
 
+        pixelkit.reset_build_stats()
         try:
             mod = load(p)
             mod.build(ctx)
             recipe_outputs = _find_recipe_outputs(p.stem, ctx.assets, ctx.preview)
             cache.record(p, palette=pal_key, exporters=exps, palette_path=pal_path, output_files=recipe_outputs)
             built.append(p.stem)
+
+            stats = pixelkit.get_build_stats()
+            if stats["snapped_pixels"] > 0:
+                warnings.append({
+                    "recipe": p.stem,
+                    "warning": f"Snapped {stats['snapped_pixels']} pixel(s) to nearest palette colors",
+                    "snapped_pixels": stats["snapped_pixels"],
+                    "binarized_alpha": stats["binarized_alpha"],
+                })
         except Exception as e:
             tb = traceback.format_exc()
             errors.append({
@@ -419,6 +433,7 @@ def build_recipes(
         project=proj_id,
         built=built,
         skipped=skipped,
+        warnings=warnings,
         errors=errors,
         validation=val.to_dict(),
     )
@@ -446,6 +461,11 @@ def cmd_build(
         print(f"[artkit] Built {len(result.built)} recipe(s): {', '.join(result.built)}")
     if result.skipped:
         print(f"[artkit] Skipped {len(result.skipped)} up-to-date recipe(s)")
+    if result.warnings:
+        print(f"[artkit] Warnings ({len(result.warnings)}):")
+        for w in result.warnings:
+            print(f"  ⚠️ {w['recipe']}: {w['warning']}")
+
     if result.errors:
         print(f"[artkit] Encountered {len(result.errors)} error(s):")
         for err in result.errors:

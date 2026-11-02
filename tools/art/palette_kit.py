@@ -4,13 +4,29 @@ Supports .hex, .gpl (GIMP/Aseprite), and .pal (JASC-PAL) formats.
 """
 from __future__ import annotations
 
+import difflib
 import re
+import warnings
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
 
 from PIL import Image
 
 RGBA = tuple[int, int, int, int]
+
+
+@dataclass
+class SnapStats:
+    snapped_pixels: int = 0
+    binarized_alpha: int = 0
+
+    def to_dict(self) -> dict[str, int]:
+        return {
+            "snapped_pixels": self.snapped_pixels,
+            "binarized_alpha": self.binarized_alpha,
+        }
+
 
 
 def hex_to_rgba(h: str, a: int = 255) -> RGBA:
@@ -76,16 +92,26 @@ class Palette:
             return cls(cand)
         raise FileNotFoundError(f"Palette '{name_or_file}' not found in {pal_dir}")
 
-    def __init__(self, path: Path | str | None = None):
-        self.path: Path | None = Path(path) if path else None
-        self.names: dict[str, RGBA] = {}
-        self.colors: list[RGBA] = []
+    def __init__(
+        self,
+        path: Path | str | None = None,
+        colors: list[RGBA] | None = None,
+        names: dict[str, RGBA] | None = None,
+        strict: bool = True,
+    ):
+        self.path: Path | None = Path(path) if (path and not isinstance(path, (list, dict))) else None
+        self.name: str = str(path) if path else "palette"
+        self.names: dict[str, RGBA] = dict(names) if names else {}
+        self.colors: list[RGBA] = list(colors) if colors else []
+        self.strict: bool = strict
         self.preview_bg: RGBA = (43, 40, 64, 255)
+        self.last_snap_stats: SnapStats = SnapStats()
         if self.path and self.path.exists():
             self.load(self.path)
 
     def load(self, path: Path):
         self.path = path
+        self.name = path.stem
         self.names.clear()
         self.colors.clear()
 
@@ -100,12 +126,15 @@ class Palette:
             self._load_hex(content)
 
     def _load_hex(self, content: str):
-        for line in content.splitlines():
-            line = line.split(";")[0].strip()
+        for line_no, raw_line in enumerate(content.splitlines(), start=1):
+            line = raw_line.split(";")[0].strip()
             if not line:
                 continue
             parts = line.split()
-            col = hex_to_rgba(parts[0])
+            try:
+                col = hex_to_rgba(parts[0])
+            except Exception as e:
+                raise ValueError(f"Invalid hex color on line {line_no} of palette '{self.name}': '{parts[0]}' ({e})")
             name = parts[1] if len(parts) > 1 else None
 
             if name == "preview_bg":
@@ -165,7 +194,9 @@ class Palette:
 
     def __getitem__(self, key: str | int) -> RGBA:
         if isinstance(key, int):
-            return self.colors[key % len(self.colors)] if self.colors else (0, 0, 0, 255)
+            if not self.colors:
+                raise IndexError(f"Cannot index into empty palette '{self.name}'")
+            return self.colors[key % len(self.colors)]
         if key.startswith("#"):
             return hex_to_rgba(key)
         if key in self.names:
@@ -175,20 +206,28 @@ class Palette:
 
         # Check semantic fallbacks
         k_lower = key.lower().strip()
+        if k_lower in self.names:
+            return self.names[k_lower]
+
         if k_lower in SEMANTIC_FALLBACKS:
             for fallback_name in SEMANTIC_FALLBACKS[k_lower]:
                 if fallback_name in self.names:
                     return self.names[fallback_name]
 
-        # Partial matching fallback
-        for name, col in self.names.items():
-            if k_lower in name or name in k_lower:
-                return col
+        if not self.strict:
+            # Non-strict legacy fallback with warning
+            for name, col in self.names.items():
+                if k_lower in name or name in k_lower:
+                    warnings.warn(f"Fuzzy matching color '{key}' -> '{name}'. Use strict color name.", UserWarning)
+                    return col
+            if self.colors:
+                return self.colors[0]
 
-        if self.colors:
-            return self.colors[0]
-
-        raise KeyError(f"Color '{key}' not found in palette")
+        # Strict mode (default): Suggest close match via difflib
+        all_candidates = list(self.names.keys()) + list(SEMANTIC_FALLBACKS.keys())
+        suggestions = difflib.get_close_matches(k_lower, all_candidates, n=3, cutoff=0.5)
+        hint = f". Did you mean: {', '.join(repr(s) for s in suggestions)}?" if suggestions else ""
+        raise KeyError(f"Color '{key}' not found in palette '{self.name}'{hint}")
 
     def get_name(self, c: RGBA) -> str | None:
         c_rgb = c[:3]
@@ -198,6 +237,8 @@ class Palette:
         return None
 
     def nearest(self, c: RGBA) -> RGBA:
+        if not self.colors:
+            raise ValueError(f"Cannot find nearest color: palette '{self.name}' is empty.")
         r, g, b, a = c
         if a < 128:
             return (0, 0, 0, 0)
@@ -208,22 +249,44 @@ class Palette:
         )
         return best
 
-    def snap(self, img: Image.Image) -> Image.Image:
+    def snap(self, img: Image.Image, return_stats: bool = False) -> Image.Image | tuple[Image.Image, SnapStats]:
         """Force every pixel onto the nearest palette color; alpha becomes binary (0 or 255)."""
         img = img.convert("RGBA")
         cache: dict[RGBA, RGBA] = {}
         px = img.load()
+        snapped_count = 0
+        alpha_count = 0
+        allowed = set(self.colors)
+
         for y in range(img.height):
             for x in range(img.width):
                 c = px[x, y]
+                if c[3] != 0 and c[3] != 255:
+                    alpha_count += 1
+                if c[3] != 0 and c not in allowed:
+                    snapped_count += 1
                 if c not in cache:
                     cache[c] = self.nearest(c)
                 px[x, y] = cache[c]
+
+        stats = SnapStats(snapped_pixels=snapped_count, binarized_alpha=alpha_count)
+        self.last_snap_stats = stats
+        if return_stats:
+            return img, stats
         return img
 
     def violations(self, img: Image.Image) -> int:
         allowed = set(self.colors)
-        return sum(1 for c in img.convert("RGBA").getdata() if c[3] != 0 and c not in allowed)
+        rgba = img.convert("RGBA")
+        raw = rgba.tobytes()
+        count = 0
+        for i in range(0, len(raw), 4):
+            a = raw[i + 3]
+            if a != 0:
+                c = (raw[i], raw[i + 1], raw[i + 2], a)
+                if c not in allowed:
+                    count += 1
+        return count
 
 
 class PaletteManager:
