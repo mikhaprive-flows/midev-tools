@@ -4,9 +4,20 @@ Path and name validation utilities to prevent directory traversal and injection 
 from __future__ import annotations
 
 import contextlib
+import os
 import re
 import time
 from pathlib import Path
+
+try:
+    import msvcrt
+    _LOCK_BACKEND = "msvcrt"
+except ImportError:
+    try:
+        import fcntl
+        _LOCK_BACKEND = "fcntl"
+    except ImportError:
+        _LOCK_BACKEND = "none"
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
@@ -210,13 +221,19 @@ def file_lock(lock_path: Path, timeout: float = 5.0):
     """
     Cross-platform file lock context manager with timeout.
     Uses msvcrt on Windows and fcntl on Unix.
+    Raises TimeoutError if lock cannot be acquired within timeout seconds.
     """
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     start_time = time.time()
-    with open(lock_path, "a+") as f:
+    with open(lock_path, "a+b") as f:
+        # Ensure at least 1 byte exists for Windows msvcrt locking
+        f.seek(0, os.SEEK_END)
+        if f.tell() == 0:
+            f.write(b"0")
+            f.flush()
+
         is_locked = False
-        try:
-            import msvcrt
+        if _LOCK_BACKEND == "msvcrt":
             while True:
                 try:
                     f.seek(0)
@@ -224,8 +241,8 @@ def file_lock(lock_path: Path, timeout: float = 5.0):
                     is_locked = True
                     break
                 except OSError:
-                    if time.time() - start_time > timeout:
-                        break
+                    if time.time() - start_time >= timeout:
+                        raise TimeoutError(f"Could not acquire file lock on '{lock_path}' within {timeout}s")
                     time.sleep(0.05)
             try:
                 yield
@@ -236,26 +253,24 @@ def file_lock(lock_path: Path, timeout: float = 5.0):
                         msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
                     except OSError:
                         pass
-        except ImportError:
-            try:
-                import fcntl
-                while True:
-                    try:
-                        fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                        is_locked = True
-                        break
-                    except OSError:
-                        if time.time() - start_time > timeout:
-                            break
-                        time.sleep(0.05)
+        elif _LOCK_BACKEND == "fcntl":
+            while True:
                 try:
-                    yield
-                finally:
-                    if is_locked:
-                        try:
-                            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-                        except OSError:
-                            pass
-            except ImportError:
+                    fcntl.flock(f.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                    is_locked = True
+                    break
+                except OSError:
+                    if time.time() - start_time >= timeout:
+                        raise TimeoutError(f"Could not acquire file lock on '{lock_path}' within {timeout}s")
+                    time.sleep(0.05)
+            try:
                 yield
+            finally:
+                if is_locked:
+                    try:
+                        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+                    except OSError:
+                        pass
+        else:
+            yield
 
