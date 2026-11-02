@@ -62,6 +62,11 @@ class TestRound2Regressions(unittest.TestCase):
     def tearDownClass(cls):
         cls.server.shutdown()
         cls.server.server_close()
+        import projects
+        try:
+            projects.set_active_project("samples/fisharium")
+        except Exception:
+            pass
 
     def setUp(self):
         self.temp_repos: list[Path] = []
@@ -107,6 +112,11 @@ class TestRound2Regressions(unittest.TestCase):
         conn2.request("POST", "/api/project/switch/demo_rpg", headers=valid_headers)
         res2 = conn2.getresponse()
         self.assertEqual(res2.status, 200, "Origin matching Studio port with valid token must return 200")
+
+        # Switch back to fisharium to isolate test environment
+        conn3 = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        conn3.request("POST", "/api/project/switch/samples/fisharium", headers=valid_headers)
+        _ = conn3.getresponse()
 
     def test_post_wrong_token_rejected(self):
         """POST dengan token salah harus ditolak (403)."""
