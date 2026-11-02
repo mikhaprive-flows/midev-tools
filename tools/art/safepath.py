@@ -52,32 +52,143 @@ def assert_safe_output_dir(p: Path, allow_external: bool = False):
         raise ValueError(f"Output directory outside workspace requires explicit approval: {rp}")
 
 
-def safe_clean_output_dir(d: Path, allow_external: bool = False):
-    """
-    Safely clean an output directory. Refuses foreign or dangerous directories.
-    Requires target to be either inside ROOT_DIR/export or contain '.midev-output'.
-    """
-    import shutil
+def validate_clean_target(d: Path, allow_external: bool = False):
+    """Validate that d is safe to clean, raising ValueError if dangerous."""
     assert_safe_output_dir(d, allow_external=allow_external)
+    rd = d.resolve()
     export_root = (ROOT_DIR / "export").resolve()
-    is_in_export = is_within(d, export_root)
-    marker = d / ".midev-output"
 
+    # 1. Refuse export root itself
+    if rd == export_root:
+        raise ValueError(
+            f"Refusing to clean export root directory '{rd}' — this would delete all project outputs. "
+            f"Please specify a specific project or output subdirectory."
+        )
+
+    # 2. Refuse if target is an ancestor of any project's output directory
+    import projects
+    for p in projects.discover_projects():
+        p_out = p.output_dir.resolve()
+        if rd != p_out and is_within(p_out, rd):
+            raise ValueError(
+                f"Refusing to clean '{rd}': target is a parent directory of project output '{p_out}'."
+            )
+
+    # 3. Target outside export must contain .midev-output marker
+    is_in_export = is_within(rd, export_root)
+    marker = rd / ".midev-output"
     if not is_in_export and not marker.exists():
         raise ValueError(
             f"Refusing to clean unsafe directory '{d}'. Target is neither inside '{export_root}' "
             f"nor marked with '.midev-output'."
         )
 
-    if d.exists():
-        for child in list(d.iterdir()):
-            if child.is_dir():
-                shutil.rmtree(child, ignore_errors=True)
-            elif child.is_file():
+
+def check_can_write_output(d: Path, allow_nonempty: bool = False, allow_external: bool = False) -> tuple[bool, str]:
+    """
+    Check if directory d can safely be used as midev output.
+    Returns (can_write, error_message).
+    """
+    assert_safe_output_dir(d, allow_external=allow_external)
+    export_root = (ROOT_DIR / "export").resolve()
+    rd = d.resolve()
+
+    # 1. Inside export/ (and not export root itself) is always safe
+    if is_within(rd, export_root) and rd != export_root:
+        return True, ""
+
+    # 2. Directory does not exist yet -> safe
+    if not rd.exists():
+        return True, ""
+
+    # 3. Marked with .midev-output -> safe
+    if (rd / ".midev-output").exists():
+        return True, ""
+
+    # 4. Empty directory -> safe
+    try:
+        children = [c for c in rd.iterdir() if c.name != ".midev-output"]
+        if not children:
+            return True, ""
+    except OSError:
+        pass
+
+    # 5. Non-empty foreign directory
+    if allow_nonempty:
+        return True, ""
+
+    return False, (
+        f"Output directory '{d}' is non-empty and not a midev output directory. "
+        f"Use --allow-nonempty-output to approve building into this existing directory."
+    )
+
+
+def ensure_output_marker(d: Path):
+    """Write .midev-output only if directory is an approved midev output location."""
+    export_root = (ROOT_DIR / "export").resolve()
+    rd = d.resolve()
+    if rd == export_root or (ROOT_DIR.resolve() == rd):
+        return
+
+    marker = rd / ".midev-output"
+    if marker.exists():
+        return
+
+    is_sub_export = is_within(rd, export_root) and rd != export_root
+    try:
+        children = [c for c in rd.iterdir() if c.name != ".midev-output"] if rd.exists() else []
+        if is_sub_export or not children:
+            marker.write_text("midev build output\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def safe_clean_output_dir(d: Path, allow_external: bool = False) -> list[str]:
+    """
+    Safely clean an output directory.
+    Deletes only standard subfolders (sprites, tiles, ui, backgrounds) and internal files.
+    Preserves foreign files/directories and returns warnings.
+    """
+    import shutil
+    validate_clean_target(d, allow_external=allow_external)
+    warnings: list[str] = []
+    if not d.exists():
+        return warnings
+
+    standard_subdirs = {"sprites", "tiles", "ui", "backgrounds"}
+    internal_files = {
+        "manifest.json",
+        "manifest.json.tmp",
+        "manifest.json.lock",
+        ".midev-cache.json",
+        ".midev-cache.json.tmp",
+        ".midev-cache.json.lock",
+        ".midev-output",
+    }
+
+    def on_rm_error(func, path, exc_info):
+        warnings.append(f"Could not remove '{path}': {exc_info[1]}")
+
+    for child in list(d.iterdir()):
+        cname = child.name
+        if child.is_dir():
+            if cname in standard_subdirs:
+                try:
+                    shutil.rmtree(child, onerror=on_rm_error)
+                except Exception as e:
+                    warnings.append(f"Error removing '{child}': {e}")
+            else:
+                warnings.append(f"Preserving foreign directory during clean: {child}")
+        elif child.is_file():
+            if cname in internal_files:
                 try:
                     child.unlink()
-                except OSError:
-                    pass
+                except OSError as e:
+                    warnings.append(f"Could not remove internal file '{child}': {e}")
+            else:
+                warnings.append(f"Preserving foreign file during clean: {child}")
+
+    return warnings
 
 
 @contextlib.contextmanager

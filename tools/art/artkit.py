@@ -32,7 +32,15 @@ from generators import (
     VFXGenerator,
 )
 from pixelkit import ROOT
-from safepath import assert_safe_output_dir, is_within, safe_clean_output_dir, validate_name
+from safepath import (
+    assert_safe_output_dir,
+    check_can_write_output,
+    ensure_output_marker,
+    is_within,
+    safe_clean_output_dir,
+    validate_clean_target,
+    validate_name,
+)
 from watcher import RecipeWatcher
 from PIL import Image
 
@@ -52,6 +60,11 @@ class BuildContext:
     previews_dir: Path
     palette_name: str
     exporters: list[str]
+    allow_external: bool = False
+    allow_nonempty: bool = False
+
+
+CURRENT_BUILD_CONTEXT: BuildContext | None = None
 
 
 def apply_config(
@@ -61,8 +74,9 @@ def apply_config(
     palette_override: str | None = None,
     format_override: str | None = None,
     allow_external_output: bool = False,
+    allow_nonempty_output: bool = False,
 ) -> BuildContext:
-    global CONFIG, RECIPES, CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR
+    global CONFIG, RECIPES, CURRENT_OUT_DIR, CURRENT_PREVIEW_DIR, CURRENT_BUILD_CONTEXT
     CONFIG = cfg
     RECIPES = cfg.recipes_dir
 
@@ -97,13 +111,17 @@ def apply_config(
         formats = cfg.exporters
     pixelkit.set_active_exporters(formats)
 
-    return BuildContext(
+    bctx = BuildContext(
         config=cfg,
         output_dir=out_dir,
         previews_dir=prev_dir,
         palette_name=pal_name,
         exporters=formats,
+        allow_external=allow_external_output,
+        allow_nonempty=allow_nonempty_output,
     )
+    CURRENT_BUILD_CONTEXT = bctx
+    return bctx
 
 
 class Ctx:
@@ -383,18 +401,50 @@ def build_recipes(
         active_proj = projects.get_active_project()
         proj_id = active_proj.id if active_proj else "unknown"
 
-        if context:
-            out = out_dir or context.output_dir
-            prev = preview_dir or context.previews_dir
-            pal_key = context.palette_name
+        b_ctx = context or CURRENT_BUILD_CONTEXT
+        if b_ctx:
+            out = out_dir or b_ctx.output_dir
+            prev = preview_dir or b_ctx.previews_dir
+            pal_key = b_ctx.palette_name
             pal_path = pixelkit.PAL.path if (pixelkit.PAL and pixelkit.PAL.path) else None
-            exps = context.exporters
+            exps = b_ctx.exporters
+            allow_external = b_ctx.allow_external
+            allow_nonempty = b_ctx.allow_nonempty
         else:
             out = out_dir or CURRENT_OUT_DIR
             prev = preview_dir or CURRENT_PREVIEW_DIR
             pal_key = pixelkit.PAL.path.stem if (pixelkit.PAL and pixelkit.PAL.path) else "default"
             pal_path = pixelkit.PAL.path if (pixelkit.PAL and pixelkit.PAL.path) else None
             exps = pixelkit.ACTIVE_EXPORTERS
+            allow_external = False
+            allow_nonempty = False
+
+        if clean:
+            # 1. Validate clean targets FIRST with zero side-effects
+            try:
+                validate_clean_target(out, allow_external=allow_external)
+                validate_clean_target(prev, allow_external=allow_external)
+            except Exception as e:
+                return BuildResult(
+                    status="error",
+                    project=proj_id,
+                    built=[],
+                    skipped=[],
+                    errors=[{"recipe": "clean", "error": str(e), "traceback": ""}],
+                    validation=ValidationResult(status="failed", violations=1, total_assets=0, assets=[]).to_dict(),
+                )
+
+        # 2. Check if output directory is safe to write to
+        can_out, err_out = check_can_write_output(out, allow_nonempty=allow_nonempty, allow_external=allow_external)
+        if not can_out:
+            return BuildResult(
+                status="error",
+                project=proj_id,
+                built=[],
+                skipped=[],
+                errors=[{"recipe": "clean" if clean else "config", "error": err_out, "traceback": ""}],
+                validation=ValidationResult(status="failed", violations=1, total_assets=0, assets=[]).to_dict(),
+            )
 
         cache_file = out / ".midev-cache.json"
         cache = BuildCache(cache_file=cache_file, project_id=proj_id)
@@ -405,10 +455,11 @@ def build_recipes(
         if clean:
             cache.clear()
             manifest.entries.clear()
-            manifest.save()
             try:
-                safe_clean_output_dir(out)
-                safe_clean_output_dir(prev)
+                warns_out = safe_clean_output_dir(out, allow_external=allow_external)
+                warns_prev = safe_clean_output_dir(prev, allow_external=allow_external)
+                for w in (*warns_out, *warns_prev):
+                    warnings.append({"recipe": "clean", "warning": w})
             except Exception as e:
                 return BuildResult(
                     status="error",
@@ -432,11 +483,8 @@ def build_recipes(
         for d in (ctx.assets, ctx.sprites, ctx.tiles, ctx.ui, ctx.backgrounds, ctx.preview):
             d.mkdir(parents=True, exist_ok=True)
 
-        try:
-            (ctx.assets / ".midev-output").write_text("midev build output\n", encoding="utf-8")
-            (ctx.preview / ".midev-output").write_text("midev build preview\n", encoding="utf-8")
-        except OSError:
-            pass
+        ensure_output_marker(ctx.assets)
+        ensure_output_marker(ctx.preview)
 
         for p in todo:
             manifest.load()
@@ -955,6 +1003,8 @@ def build_parser() -> argparse.ArgumentParser:
     common.add_argument("--palette", type=str, default=None, help="Active palette name or file")
     common.add_argument("--format", "-f", type=str, default=None, help="Export format(s): godot, texturepacker, slices, native, all")
     common.add_argument("--clean", action="store_true", help="Clean output directory before building")
+    common.add_argument("--allow-external-output", action="store_true", help="Allow building into directory outside workspace")
+    common.add_argument("--allow-nonempty-output", action="store_true", help="Allow building into existing non-empty directory")
     common.add_argument("--json", action="store_true", help="Output machine-readable JSON (ideal for AI agents and automation)")
 
     parser = argparse.ArgumentParser(prog="artkit", parents=[common], description="midev-tools code-generated game art pipeline")
@@ -1022,7 +1072,17 @@ def main(argv: list[str]) -> int:
 
     # Load configuration aligned with active project
     cfg = MidevConfig.load(args.config, project_override=proj_override)
-    apply_config(cfg, out_override=args.out, preview_override=args.preview, palette_override=args.palette, format_override=args.format)
+    allow_ext = bool(getattr(args, "allow_external_output", False) or ("--allow-external-output" in unknown) or ("--allow-external-output" in argv))
+    allow_nonempty = bool(getattr(args, "allow_nonempty_output", False) or ("--allow-nonempty-output" in unknown) or ("--allow-nonempty-output" in argv))
+    apply_config(
+        cfg,
+        out_override=args.out,
+        preview_override=args.preview,
+        palette_override=args.palette,
+        format_override=args.format,
+        allow_external_output=allow_ext,
+        allow_nonempty_output=allow_nonempty,
+    )
 
     as_json = bool(getattr(args, "json", False) or ("--json" in unknown) or ("--json" in argv))
 
