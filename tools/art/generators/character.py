@@ -4,8 +4,16 @@ Generates 4-directional animated sprite sheets with swappable equipment, hair, a
 """
 from __future__ import annotations
 
+import difflib
 from dataclasses import dataclass
+from typing import Any
 from pixelkit import Canvas, SheetBuilder
+
+VALID_HAIR_STYLES = {"short", "long", "spiky", "bald"}
+VALID_OUTFITS = {"tunic", "armor", "robe"}
+VALID_WEAPONS = {"sword", "staff", "bow", "axe", None}
+VALID_HELMETS = {"cap", "helm", "hood", None}
+VALID_SHIELDS = {"wood_shield", "buckler", None}
 
 
 @dataclass
@@ -20,10 +28,30 @@ class CharacterConfig:
     outfit_color: str = "dark_blue"
     pants_color: str = "navy"
     shoes_color: str = "wood"
-    weapon: str | None = "sword"  # "sword", "staff", "bow", None
+    weapon: str | None = "sword"  # "sword", "staff", "bow", "axe", None
     weapon_color: str = "iron"
     helmet: str | None = None     # "cap", "helm", "hood", None
     shield: str | None = None     # "wood_shield", "buckler", None
+
+    def __post_init__(self):
+        def check_field(field_name: str, value: Any, valid_set: set[Any]):
+            if value is None and None in valid_set:
+                return
+            if value not in valid_set:
+                candidates = [str(x) for x in sorted(valid_set, key=lambda v: str(v)) if x is not None]
+                val_str = str(value)
+                matches = difflib.get_close_matches(val_str, candidates, n=3, cutoff=0.4)
+                hint = f". Did you mean: {', '.join(repr(m) for m in matches)}?" if matches else ""
+                options = ", ".join(repr(x) for x in candidates)
+                raise ValueError(
+                    f"Invalid {field_name}='{value}'. Supported options: [{options}]{hint}"
+                )
+
+        check_field("hair_style", self.hair_style, VALID_HAIR_STYLES)
+        check_field("outfit", self.outfit, VALID_OUTFITS)
+        check_field("weapon", self.weapon, VALID_WEAPONS)
+        check_field("helmet", self.helmet, VALID_HELMETS)
+        check_field("shield", self.shield, VALID_SHIELDS)
 
 
 class CharacterGenerator:
@@ -79,12 +107,33 @@ class CharacterGenerator:
                 c.rect(cx - 1 - step_off, feet_y, 3, 2, shoes_col)
 
         # 2. Torso & Outfit
-        if facing in ("down", "up"):
-            c.rect(cx - 3, torso_y, 6, 6, outfit_col)
-            c.rect(cx - 3, pelvis_y - 1, 6, 1, "outline")
-        else:  # side
-            c.rect(cx - 2, torso_y, 5, 6, outfit_col)
-            c.rect(cx - 2, pelvis_y - 1, 5, 1, "outline")
+        if cfg.outfit == "robe":
+            if facing in ("down", "up"):
+                c.rect(cx - 3, torso_y, 6, 11, outfit_col)
+                c.rect(cx - 3, pelvis_y - 1, 6, 1, "outline")
+            else:
+                c.rect(cx - 2, torso_y, 5, 11, outfit_col)
+                c.rect(cx - 2, pelvis_y - 1, 5, 1, "outline")
+        elif cfg.outfit == "armor":
+            if facing in ("down", "up"):
+                c.rect(cx - 3, torso_y, 6, 6, outfit_col)
+                c.rect(cx - 4, torso_y, 1, 3, "iron")
+                c.rect(cx + 3, torso_y, 1, 3, "iron")
+                c.rect(cx - 2, torso_y + 1, 4, 3, "iron")
+                c.px(cx - 1, torso_y + 1, "white")
+                c.rect(cx - 3, pelvis_y - 1, 6, 1, "gold")
+            else:
+                c.rect(cx - 2, torso_y, 5, 6, outfit_col)
+                c.rect(cx - 2, torso_y, 4, 3, "iron")
+                c.px(cx - 1, torso_y + 1, "white")
+                c.rect(cx - 2, pelvis_y - 1, 5, 1, "gold")
+        else:  # tunic
+            if facing in ("down", "up"):
+                c.rect(cx - 3, torso_y, 6, 6, outfit_col)
+                c.rect(cx - 3, pelvis_y - 1, 6, 1, "outline")
+            else:
+                c.rect(cx - 2, torso_y, 5, 6, outfit_col)
+                c.rect(cx - 2, pelvis_y - 1, 5, 1, "outline")
 
         # 3. Head & Skin
         if facing in ("down", "up"):
@@ -101,21 +150,45 @@ class CharacterGenerator:
                 c.px(cx + 1, head_y + 3, "outline")
 
         # 4. Hair / Helmet
-        if cfg.helmet:
+        if cfg.helmet == "cap":
+            c.rect(cx - 4, head_y - 1, 8, 2, outfit_col)
+            c.px(cx + 3, head_y, outfit_col)
+        elif cfg.helmet == "helm":
             c.rect(cx - 4, head_y - 1, 8, 3, "iron")
             c.rect(cx - 3, head_y - 2, 6, 2, "iron")
+        elif cfg.helmet == "hood":
+            c.rect(cx - 4, head_y - 1, 8, 4, outfit_col)
+            c.rect(cx - 3, head_y - 2, 6, 2, outfit_col)
         elif cfg.hair_style != "bald":
             c.rect(cx - 3, head_y - 1, 6, 2, hair_col)
             if facing == "up":
                 c.rect(cx - 3, head_y, 6, 4, hair_col)
             elif facing == "side":
                 c.rect(cx - 3, head_y - 1, 4, 3, hair_col)
-            elif cfg.hair_style == "spiky":
+            if cfg.hair_style == "spiky":
                 c.px(cx - 2, head_y - 2, hair_col)
                 c.px(cx, head_y - 3, hair_col)
                 c.px(cx + 2, head_y - 2, hair_col)
+            elif cfg.hair_style == "long":
+                c.rect(cx - 4, head_y + 2, 1, 4, hair_col)
+                c.rect(cx + 3, head_y + 2, 1, 4, hair_col)
 
-        # 5. Arms & Weapon
+        # 5. Shield on off-hand (left)
+        if cfg.shield and attack_phase == 0:
+            if cfg.shield == "buckler":
+                if facing in ("down", "up"):
+                    c.rect(cx - 5, torso_y + 2, 3, 3, "iron")
+                    c.px(cx - 4, torso_y + 3, "gold")
+                elif facing == "side":
+                    c.rect(cx - 3, torso_y + 2, 2, 3, "iron")
+            elif cfg.shield == "wood_shield":
+                if facing in ("down", "up"):
+                    c.rect(cx - 5, torso_y + 1, 3, 5, "wood")
+                    c.px(cx - 4, torso_y + 3, "iron")
+                elif facing == "side":
+                    c.rect(cx - 3, torso_y + 1, 2, 5, "wood")
+
+        # 6. Arms & Weapon
         arm_off = arm_phase * 2
         if attack_phase > 0:
             if attack_phase == 1:  # Windup
@@ -134,17 +207,40 @@ class CharacterGenerator:
             elif cfg.weapon == "staff":
                 c.line(w_x, w_y + 3, w_x + 1, w_y - 7, "wood")
                 c.px(w_x + 1, w_y - 8, "cyan")
+            elif cfg.weapon == "axe":
+                c.line(w_x, w_y + 2, w_x + 2, w_y - 5, "wood")
+                c.rect(w_x + 1, w_y - 6, 3, 3, weapon_col)
+            elif cfg.weapon == "bow":
+                c.line(w_x, w_y - 5, w_x + 2, w_y - 2, "wood")
+                c.line(w_x + 2, w_y - 2, w_x, w_y + 1, "wood")
+                c.line(w_x, w_y - 5, w_x, w_y + 1, "outline")
         else:
             if facing in ("down", "up"):
                 c.rect(cx - 4, torso_y + 1 + arm_off, 2, 4, skin)
                 c.rect(cx + 3, torso_y + 1 - arm_off, 2, 4, skin)
-                if cfg.weapon == "sword" and facing == "down":
-                    c.line(cx + 4, torso_y + 4, cx + 4, torso_y + 9, weapon_col)
-                    c.px(cx + 4, torso_y + 4, "gold")
+                if facing == "down":
+                    if cfg.weapon == "sword":
+                        c.line(cx + 4, torso_y + 4, cx + 4, torso_y + 9, weapon_col)
+                        c.px(cx + 4, torso_y + 4, "gold")
+                    elif cfg.weapon == "axe":
+                        c.line(cx + 4, torso_y + 4, cx + 4, torso_y + 9, "wood")
+                        c.rect(cx + 3, torso_y + 4, 3, 2, weapon_col)
+                    elif cfg.weapon == "staff":
+                        c.line(cx + 4, torso_y + 2, cx + 4, torso_y + 10, "wood")
+                        c.px(cx + 4, torso_y + 1, "cyan")
+                    elif cfg.weapon == "bow":
+                        c.line(cx + 4, torso_y + 3, cx + 4, torso_y + 8, "wood")
             else:  # side
                 c.rect(cx + 1, torso_y + 1 + arm_off, 2, 4, skin)
                 if cfg.weapon == "sword":
                     c.line(cx + 2, torso_y + 3, cx + 5, torso_y + 6, weapon_col)
+                elif cfg.weapon == "axe":
+                    c.line(cx + 2, torso_y + 3, cx + 5, torso_y + 6, "wood")
+                    c.rect(cx + 4, torso_y + 5, 2, 2, weapon_col)
+                elif cfg.weapon == "staff":
+                    c.line(cx + 2, torso_y + 1, cx + 5, torso_y + 8, "wood")
+                elif cfg.weapon == "bow":
+                    c.line(cx + 3, torso_y + 2, cx + 3, torso_y + 7, "wood")
 
         c.outline()
         return c

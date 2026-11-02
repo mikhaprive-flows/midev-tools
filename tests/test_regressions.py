@@ -358,5 +358,31 @@ class TestRegressions(unittest.TestCase):
         self.assertIn("unrecognized arguments", data["errors"][0]["error"])
 
 
+    def test_character_generator_validation_and_features(self):
+        """CharacterConfig must reject unknown enums with ValueError and suggestions."""
+        from generators.character import CharacterConfig, CharacterGenerator
+
+        with self.assertRaises(ValueError):
+            CharacterConfig(hair_style="mohawk")
+
+        with self.assertRaises(ValueError):
+            CharacterConfig(outfit="none")
+
+        with self.assertRaises(ValueError):
+            CharacterConfig(shield="tower")
+
+        # Distinct rendering for weapon
+        c_nowep = CharacterGenerator(CharacterConfig(weapon=None)).draw_figure()
+        c_axe = CharacterGenerator(CharacterConfig(weapon="axe")).draw_figure()
+        c_sword = CharacterGenerator(CharacterConfig(weapon="sword")).draw_figure()
+
+        pixels_nowep = sum(1 for p in c_nowep.img.convert("RGBA").getdata() if p[3] > 0)
+        pixels_axe = sum(1 for p in c_axe.img.convert("RGBA").getdata() if p[3] > 0)
+        pixels_sword = sum(1 for p in c_sword.img.convert("RGBA").getdata() if p[3] > 0)
+
+        self.assertGreater(pixels_axe, pixels_nowep, "Axe must have more pixels than no weapon")
+        self.assertNotEqual(pixels_axe, pixels_sword, "Axe must render distinctly from sword")
+
+
 if __name__ == "__main__":
     unittest.main()
