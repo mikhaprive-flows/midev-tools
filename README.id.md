@@ -43,9 +43,9 @@ Setiap sprite, frame animasi, dan garis luar (*outline*) digenerate 100% secara 
 | **Untuk Programmer** | ❌ Piksel acak, tanpa kontrol kode | ⏱️ Berjam-jam menggeser piksel manual | ✅ **100% Kode Python & Matematika (`API_REFERENCE.md`)** |
 | **Untuk AI Agent** | ⚠️ Bergantung pada undian prompt | ❌ Agent tidak bisa menggunakan GUI mouse | ✅ **Resep Python native + MCP Server (`AGENTS.md`)** |
 | **Gaya & Palet** | ❌ Warna blur & bleed inkonsisten | ✅ Konsistensi terjaga manual | ✅ **Penyesuaian deterministik ketat (0 bleeds)** |
-| **Metadata Engine** | ❌ Nihil (PNG mentah tanpa frame data) | ⚠️ Pemotongan & tagging manual | ✅ **Otomatis .tres Godot 4, TexturePacker, Slices** |
+| **Metadata Engine** | ❌ Nihil (PNG mentah tanpa frame data) | ⚠️ Pemotongan & tagging manual | ✅ **Otomatis Godot 4 TileSet/SpriteFrames .tres, StyleBoxTexture 9-Slice, Tiled .tsx, TexturePacker, Slices** |
 | **Version Control** | ❌ Binary blob mengotori Git | ❌ File biner `.ase` / `.psd` | ✅ **Skrip Python teks biasa yang mudah di-diff di Git PR** |
-| **Feedback Visual** | ⏱️ Reroll puluhan kali | ⏱️ Iterasi manual lambat | ⚡ **Inspeksi Multimodal (`midev inspect`) dalam hitungan detik** |
+| **Feedback Visual** | ⏱️ Reroll puluhan kali | ⏱️ Iterasi manual lambat | ⚡ **Inspeksi Multimodal & Visual Delta (`midev inspect` / `midev diff`) dalam hitungan detik** |
 
 ---
 
@@ -187,6 +187,10 @@ python midev.py inspect player --json
 
 # Jalankan Model Context Protocol (MCP) Server untuk Cursor / Claude Desktop / Antigravity
 python midev.py mcp
+
+# Inspeksi visual & komputasi delta piksel untuk AI agent & developer
+python midev.py inspect player
+python midev.py diff player
 
 # Jalankan suite pengujian otomatis
 python midev.py test

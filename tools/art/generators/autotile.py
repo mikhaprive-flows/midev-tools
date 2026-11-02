@@ -6,6 +6,7 @@ Arranges 47 canonical tiles + 1 pad tile into an 8x6 grid with full bitmask side
 from __future__ import annotations
 
 import itertools
+import random
 from dataclasses import dataclass
 from typing import Any
 
@@ -35,6 +36,7 @@ class AutotileConfig:
     border_color: str = "outline"
     highlight_color: str = "foam"
     style: str = "terrain"
+    seed: int = 42
 
     def __post_init__(self):
         if self.tile_size <= 0:
@@ -184,6 +186,8 @@ class AutotileGenerator:
 
     def __init__(self, config: AutotileConfig | None = None):
         self.cfg = config or AutotileConfig()
+        self.seed = self.cfg.seed
+        self.rng = random.Random(self.seed)
         self.size = self.cfg.tile_size
 
     def draw_tile(self, bitmask: dict[str, Any]) -> Canvas:

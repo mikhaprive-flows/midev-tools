@@ -5,6 +5,7 @@ Generates 4-directional animated sprite sheets with swappable equipment, hair, a
 from __future__ import annotations
 
 import difflib
+import random
 from dataclasses import dataclass
 from typing import Any
 from pixelkit import Canvas, SheetBuilder
@@ -32,6 +33,7 @@ class CharacterConfig:
     weapon_color: str = "iron"
     helmet: str | None = None     # "cap", "helm", "hood", None
     shield: str | None = None     # "wood_shield", "buckler", None
+    seed: int = 42
 
     def __post_init__(self):
         if self.width <= 0:
@@ -64,6 +66,8 @@ class CharacterGenerator:
 
     def __init__(self, config: CharacterConfig | None = None):
         self.cfg = config or CharacterConfig()
+        self.seed = self.cfg.seed
+        self.rng = random.Random(self.seed)
         self.w = self.cfg.width
         self.h = self.cfg.height
         self.cx = self.w // 2

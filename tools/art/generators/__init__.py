@@ -11,8 +11,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from generators.character import CharacterGenerator, CharacterConfig
 from generators.autotile import AutotileGenerator, AutotileConfig
-from generators.vfx import VFXGenerator
-from generators.uikit import UIKitGenerator
+from generators.vfx import VFXGenerator, VFXConfig
+from generators.uikit import UIKitGenerator, UIKitConfig
 
 __all__ = [
     "CharacterGenerator",
@@ -20,5 +20,7 @@ __all__ = [
     "AutotileGenerator",
     "AutotileConfig",
     "VFXGenerator",
+    "VFXConfig",
     "UIKitGenerator",
+    "UIKitConfig",
 ]

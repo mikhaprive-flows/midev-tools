@@ -5,6 +5,31 @@ All notable changes to `midev-tools` will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.1] - 2026-11-02
+
+### Added
+- **Subprocess Recipe Execution Isolation** (`tools/art/worker.py`):
+  - Every recipe runs in an isolated Python subprocess worker with clean environment and state.
+  - Watchdog timeout (default 30.0s, configurable via `--timeout`) automatically terminating hanging recipes with `TimeoutError`.
+  - Full parallel build capabilities (`--parallel` / `-j`) dispatching multiple recipes concurrently across worker subprocesses.
+- **Multimodal AI-Agent Inspection & Feedback**:
+  - MCP `midev_inspect_recipe` now returns standard MCP `image` content blocks (base64 PNG) alongside text metadata, enabling multimodal LLMs to inspect visual sheets directly.
+  - Visual delta and diff engine (`tools/art/diff_tool.py`, CLI `midev diff <recipe> [--json]`, MCP `midev_diff_recipe`):
+    - Computes pixel-by-pixel changes, percentage, and bounding box `[x, y, w, h]`.
+    - Generates high-contrast visual difference maps with highlighted changes in red.
+    - Automatic snapshot cache `.diff_cache/<recipe>.png` captured prior to rebuilds for effortless before-and-after comparison.
+  - Golden-image visual regression suite (`tests/test_golden_visuals.py`) asserting canonical SHA-256 pixel digests across all procedural generators.
+- **Engine-Ready Game Assets**:
+  - Godot 4 `TileSet` `.tres` terrain exporter (`tools/art/exporters/godot_tileset.py`):
+    - Automatically maps 47 canonical Wang Blob autotiles to Godot 4 TerrainSet 0 (`Match Corners and Sides` mode).
+    - Writes all 8 peering bits (`top_side`, `right_side`, `bottom_right_corner`, etc.) directly into `.tres` ready for drag-and-drop into `TileMapLayer`.
+  - 9-Slice UI kit metadata sidecar (`margins`) and Godot 4 `StyleBoxTexture` `.tres` exporter for scalable UI panels.
+  - 1px anti-bleed texture padding and border extrusion (`extrude: int = 0`) on `SheetBuilder.save()`, eliminating GPU linear filtering bleeding artifacts on tile atlases.
+  - Tiled Map Editor (`.tsx`) XML exporter (`tools/art/exporters/tiled.py`) with Wang sets and 8-bit terrain Wang tiles.
+- **Determinism & Manifest Integrity**:
+  - Explicit `seed: int = 42` across procedural generators (`CharacterConfig`, `AutotileConfig`, `VFXConfig`, `UIKitConfig`) using isolated `random.Random(seed)` instances.
+  - Manifest integrity tracking: `manifest.json` now records `tool_version: "1.0.1"`, `palette_checksum`, `recipe_checksum`, and `generator_seed`.
+
 ## [1.0.0] - 2026-11-02
 
 ### Added

@@ -420,6 +420,25 @@ class SheetBuilder:
             asset_hash = hashlib.sha256(png.read_bytes()).hexdigest() if png.exists() else ""
             recipe_name = _CURRENT_RECIPE or self.name
 
+            pal_checksum = ""
+            if PAL and getattr(PAL, "path", None) and Path(PAL.path).exists():
+                try:
+                    pal_checksum = hashlib.sha256(Path(PAL.path).read_bytes()).hexdigest()
+                except Exception:
+                    pass
+
+            rec_checksum = ""
+            try:
+                import artkit
+                for rec_p in artkit.recipes():
+                    if rec_p.stem == recipe_name:
+                        rec_checksum = hashlib.sha256(rec_p.read_bytes()).hexdigest()
+                        break
+            except Exception:
+                pass
+
+            gen_seed = int(self.extra_meta.get("seed", 42))
+
             from manifest import Manifest, AssetEntry
             manifest = Manifest(output_root / "manifest.json")
             manifest.add_asset(
@@ -432,6 +451,9 @@ class SheetBuilder:
                     origin=list(self.origin),
                     anims=[a[0] for a in self.anims],
                     hash=asset_hash,
+                    palette_checksum=pal_checksum,
+                    recipe_checksum=rec_checksum,
+                    generator_seed=gen_seed,
                 )
             )
             manifest.save()

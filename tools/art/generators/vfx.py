@@ -5,16 +5,27 @@ Generates animated sprite sheets for explosions, water ripples/splashes, sword s
 from __future__ import annotations
 
 import math
+import random
+from dataclasses import dataclass
 from pixelkit import Canvas, SheetBuilder
+
+
+@dataclass
+class VFXConfig:
+    size: int = 32
+    seed: int = 42
 
 
 class VFXGenerator:
     """Generates procedural pixel-art game visual effects."""
 
-    def __init__(self, size: int = 32):
-        self.size = size
-        self.cx = size // 2
-        self.cy = size // 2
+    def __init__(self, size: int = 32, seed: int = 42, config: VFXConfig | None = None):
+        self.cfg = config or VFXConfig(size=size, seed=seed)
+        self.size = self.cfg.size
+        self.seed = self.cfg.seed
+        self.rng = random.Random(self.seed)
+        self.cx = self.size // 2
+        self.cy = self.size // 2
 
     def generate_explosion(self, frames: int = 6) -> list[Canvas]:
         """Procedural radial fireball and dissipation smoke explosion."""

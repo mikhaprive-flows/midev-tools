@@ -28,6 +28,9 @@ class AssetEntry:
     origin: list[int] = field(default_factory=lambda: [0, 0])      # [ox, oy]
     anims: list[str] = field(default_factory=list)                 # animation names
     hash: str = ""          # sha256 hex digest of primary asset file
+    palette_checksum: str = ""
+    recipe_checksum: str = ""
+    generator_seed: int = 42
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -39,6 +42,9 @@ class AssetEntry:
             "origin": list(self.origin),
             "anims": list(self.anims),
             "hash": self.hash,
+            "palette_checksum": self.palette_checksum,
+            "recipe_checksum": self.recipe_checksum,
+            "generator_seed": self.generator_seed,
         }
 
     @classmethod
@@ -52,6 +58,9 @@ class AssetEntry:
             origin=list(data.get("origin", [0, 0])),
             anims=list(data.get("anims", [])),
             hash=str(data.get("hash", "")),
+            palette_checksum=str(data.get("palette_checksum", "")),
+            recipe_checksum=str(data.get("recipe_checksum", "")),
+            generator_seed=int(data.get("generator_seed", 42)),
         )
 
 
@@ -160,6 +169,7 @@ class Manifest:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         data = {
             "version": 1,
+            "tool_version": "1.0.1",
             "assets": {k: v.to_dict() for k, v in self.entries.items()},
         }
         lock_file = self.path.with_name(f"{self.path.name}.lock")

@@ -4,14 +4,25 @@ Generates scalable dialog panels, stat bars, inventory slots, and buttons for ga
 """
 from __future__ import annotations
 
+import random
+from dataclasses import dataclass
 from pixelkit import Canvas, SheetBuilder
+
+
+@dataclass
+class UIKitConfig:
+    cell_size: int = 48
+    seed: int = 42
 
 
 class UIKitGenerator:
     """Generates procedural pixel-art UI components."""
 
-    def __init__(self, cell_size: int = 48):
-        self.cell_size = cell_size
+    def __init__(self, cell_size: int = 48, seed: int = 42, config: UIKitConfig | None = None):
+        self.cfg = config or UIKitConfig(cell_size=cell_size, seed=seed)
+        self.cell_size = self.cfg.cell_size
+        self.seed = self.cfg.seed
+        self.rng = random.Random(self.seed)
 
     def generate_9slice_panel(
         self,

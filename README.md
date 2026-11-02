@@ -43,9 +43,9 @@ Every sprite, animation frame, and outline is generated 100% deterministically f
 | **For Programmers** | ❌ Random pixels, no code control | ⏱️ Hours of manual pixel pushing | ✅ **100% Python Code & Math (`API_REFERENCE.md`)** |
 | **For AI Agents** | ⚠️ Vague prompt lottery | ❌ Agents cannot use a mouse GUI | ✅ **Native Python recipes + MCP Server (`AGENTS.md`)** |
 | **Style & Palette** | ❌ Inconsistent blur & bleed | ✅ Manual consistency | ✅ **Strict Deterministic snapping (0 bleeds)** |
-| **Engine Metadata** | ❌ None (raw png, no frames) | ⚠️ Manual slicing & tagging | ✅ **Auto Godot 4 .tres, TexturePacker, Slices** |
+| **Engine Metadata** | ❌ None (raw png, no frames) | ⚠️ Manual slicing & tagging | ✅ **Auto Godot 4 TileSet/SpriteFrames .tres, StyleBoxTexture 9-Slice, Tiled .tsx, TexturePacker, Slices** |
 | **Version Control** | ❌ Binary blobs cluttering Git | ❌ Binary `.ase` / `.psd` files | ✅ **Plain text Python scripts diffable in Git PRs** |
-| **Visual Feedback** | ⏱️ Re-roll 50 times | ⏱️ Slow manual iteration | ⚡ **Multimodal Inspection (`midev inspect`) in seconds** |
+| **Visual Feedback** | ⏱️ Re-roll 50 times | ⏱️ Slow manual iteration | ⚡ **Multimodal Inspection & Visual Delta (`midev inspect` / `midev diff`) in seconds** |
 
 ---
 
@@ -187,6 +187,10 @@ python midev.py inspect player --json
 
 # Start Model Context Protocol (MCP) Server for Cursor / Claude Desktop / Antigravity
 python midev.py mcp
+
+# Visual inspection & pixel diffing for AI agents & human developers
+python midev.py inspect player
+python midev.py diff player
 
 # Run automated test suite
 python midev.py test
