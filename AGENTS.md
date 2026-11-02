@@ -100,6 +100,7 @@ When connected via Model Context Protocol:
   - `midev_list_recipes`: Discover all existing recipes in project.
   - `midev_build_recipe`: Compile recipes to spritesheets.
   - `midev_inspect_recipe`: Generate annotated inspection sheet for vision review.
+  - `midev_diff_recipe`: Compute pixel-by-pixel visual diff between asset builds.
   - `midev_validate_assets`: Run quality gate checks (palette & alpha).
   - `midev_get_canvas_docs`: Retrieve `pixelkit.Canvas` function signatures.
   - `midev_switch_project`: Switch active workspace.
@@ -113,6 +114,7 @@ Always append `--json` when invoking commands programmatically:
 ```bash
 python midev.py build [name] --json
 python midev.py inspect <name> --json
+python midev.py diff <name> --json
 python midev.py validate --json
 python midev.py list --json
 python midev.py doctor --json

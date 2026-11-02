@@ -6,6 +6,7 @@ Requires zero external dependencies (100% Python standard library).
 """
 from __future__ import annotations
 
+import base64
 import concurrent.futures
 import contextlib
 import io
@@ -138,6 +139,14 @@ class MCPServer:
             res["isError"] = True
         self.send_response(req_id, res)
 
+    def send_tool_content(self, req_id: Any, content: list[dict[str, Any]], is_error: bool = False):
+        res: dict[str, Any] = {
+            "content": content
+        }
+        if is_error:
+            res["isError"] = True
+        self.send_response(req_id, res)
+
     def send_tool_error(self, req_id: Any, message: str, traceback_str: str | None = None):
         text = message
         if traceback_str:
@@ -211,7 +220,7 @@ class MCPServer:
             },
             {
                 "name": "midev_inspect_recipe",
-                "description": "Generate an annotated multimodal visual verification sheet (1-16x scale) with frame numbers, origin crosshairs, and palette swatches. Returns the sheet image path for vision review.",
+                "description": "Generate an annotated multimodal visual verification sheet (1-16x scale) with frame numbers, origin crosshairs, and palette swatches. Returns both an image and metadata for vision review.",
                 "inputSchema": {
                     "type": "object",
                     "properties": {
@@ -224,6 +233,24 @@ class MCPServer:
                             "minimum": 1,
                             "maximum": 16,
                             "description": "Scale factor for pixels (1 to 16, default 4)",
+                        },
+                    },
+                    "required": ["recipe"],
+                },
+            },
+            {
+                "name": "midev_diff_recipe",
+                "description": "Compare pixel-by-pixel visual diff between asset builds, reporting changed pixel count, percentage, delta bounding box, and diff visual map.",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "recipe": {
+                            "type": "string",
+                            "description": "Recipe name to compute visual diff for",
+                        },
+                        "target": {
+                            "type": "string",
+                            "description": "Optional reference PNG path to compare against (defaults to prior build)",
                         },
                     },
                     "required": ["recipe"],
@@ -428,7 +455,64 @@ class MCPServer:
             with artkit.BUILD_LOCK:
                 sheet_data = inspect_tool.generate_inspection_sheet(rec, scale=scale_val)
 
-            self.send_tool_result(req_id, sheet_data)
+            sheet_img_path = sheet_data.get("inspectionSheet")
+            content_list: list[dict[str, Any]] = []
+            if sheet_img_path and Path(sheet_img_path).exists():
+                try:
+                    with open(sheet_img_path, "rb") as f:
+                        b64_data = base64.b64encode(f.read()).decode("utf-8")
+                    content_list.append({
+                        "type": "image",
+                        "data": b64_data,
+                        "mimeType": "image/png",
+                    })
+                except Exception as e:
+                    sys.stderr.write(f"[mcp] Failed to encode inspection image: {e}\n")
+
+            content_list.append({
+                "type": "text",
+                "text": json.dumps(sheet_data, indent=2),
+            })
+            self.send_tool_content(req_id, content_list)
+
+        elif name == "midev_diff_recipe":
+            rec = args.get("recipe")
+            if not rec or not isinstance(rec, str):
+                self.send_tool_error(req_id, "Missing required string argument 'recipe'")
+                return
+            try:
+                rec = validate_name(rec, "recipe name")
+            except ValueError as e:
+                self.send_tool_error(req_id, str(e))
+                return
+
+            target_val = args.get("target")
+            import diff_tool
+            try:
+                with artkit.BUILD_LOCK:
+                    diff_data = diff_tool.diff_recipe(rec, target=target_val)
+
+                diff_img_path = diff_data.get("diffImage")
+                content_list = []
+                if diff_img_path and Path(diff_img_path).exists():
+                    try:
+                        with open(diff_img_path, "rb") as f:
+                            b64_data = base64.b64encode(f.read()).decode("utf-8")
+                        content_list.append({
+                            "type": "image",
+                            "data": b64_data,
+                            "mimeType": "image/png",
+                        })
+                    except Exception as e:
+                        sys.stderr.write(f"[mcp] Failed to encode diff image: {e}\n")
+
+                content_list.append({
+                    "type": "text",
+                    "text": json.dumps(diff_data, indent=2),
+                })
+                self.send_tool_content(req_id, content_list)
+            except Exception as e:
+                self.send_tool_error(req_id, f"Visual diff failed for '{rec}': {e}")
 
         elif name == "midev_validate_assets":
             target = args.get("target")

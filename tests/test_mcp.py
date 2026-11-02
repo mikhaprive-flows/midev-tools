@@ -99,6 +99,7 @@ class TestMCPServer(unittest.TestCase):
         self.assertIn("midev_list_recipes", tool_names)
         self.assertIn("midev_build_recipe", tool_names)
         self.assertIn("midev_inspect_recipe", tool_names)
+        self.assertIn("midev_diff_recipe", tool_names)
         self.assertIn("midev_validate_assets", tool_names)
         self.assertIn("midev_get_canvas_docs", tool_names)
         self.assertIn("midev_switch_project", tool_names)
@@ -218,6 +219,59 @@ class TestMCPServer(unittest.TestCase):
         payload = json.loads(result["content"][0]["text"])
         self.assertIn("errors", payload)
         self.assertIn("count", payload)
+
+    def test_mcp_inspect_returns_image_and_text(self):
+        """midev_inspect_recipe must return both base64 image and json text content."""
+        req = {
+            "jsonrpc": "2.0",
+            "id": 9,
+            "method": "tools/call",
+            "params": {
+                "name": "midev_inspect_recipe",
+                "arguments": {"recipe": "player", "scale": 2},
+            },
+        }
+        resp = self.run_rpc(req)
+        result = resp.get("result", {})
+        self.assertFalse(result.get("isError", False))
+        content = result.get("content", [])
+        self.assertTrue(len(content) >= 2)
+
+        # Check image block
+        img_blocks = [c for c in content if c.get("type") == "image"]
+        self.assertEqual(len(img_blocks), 1)
+        self.assertEqual(img_blocks[0].get("mimeType"), "image/png")
+        self.assertTrue(len(img_blocks[0].get("data", "")) > 100)
+
+        # Check text block
+        text_blocks = [c for c in content if c.get("type") == "text"]
+        self.assertEqual(len(text_blocks), 1)
+        meta = json.loads(text_blocks[0].get("text", "{}"))
+        self.assertEqual(meta.get("recipe"), "player")
+        self.assertIn("frameWidth", meta)
+
+    def test_mcp_diff_recipe_call(self):
+        """midev_diff_recipe must return comparison delta metrics."""
+        req = {
+            "jsonrpc": "2.0",
+            "id": 12,
+            "method": "tools/call",
+            "params": {
+                "name": "midev_diff_recipe",
+                "arguments": {"recipe": "player"},
+            },
+        }
+        resp = self.run_rpc(req)
+        result = resp.get("result", {})
+        self.assertFalse(result.get("isError", False))
+        content = result.get("content", [])
+        self.assertTrue(len(content) >= 1)
+        text_blocks = [c for c in content if c.get("type") == "text"]
+        diff_data = json.loads(text_blocks[0].get("text", "{}"))
+        self.assertEqual(diff_data.get("recipe"), "player")
+        self.assertIn("changedPixels", diff_data)
+        self.assertIn("totalPixels", diff_data)
+        self.assertIn("identical", diff_data)
 
 
 if __name__ == "__main__":

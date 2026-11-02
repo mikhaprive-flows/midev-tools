@@ -640,6 +640,18 @@ def build_recipes(
         todo = valid_todo
 
         def build_one_recipe(p: Path) -> tuple[Path, dict[str, Any]]:
+            # Snapshot prior primary PNG to .diff_cache for visual diff comparisons
+            diff_cache_dir = out / ".diff_cache"
+            try:
+                for cat in ("sprites", "tiles", "ui", "backgrounds"):
+                    prior_png = out / cat / f"{p.stem}.png"
+                    if prior_png.exists():
+                        diff_cache_dir.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(str(prior_png), str(diff_cache_dir / f"{p.stem}.png"))
+                        break
+            except Exception:
+                pass
+
             manifest.load()
             old_files = manifest.remove_recipe(p.stem)
             for rel_f in old_files:
@@ -1224,6 +1236,11 @@ def build_parser() -> argparse.ArgumentParser:
     sub_inspect.add_argument("--scale", type=int, default=4, help="Scale factor (default: 4)")
     sub_inspect.add_argument("--out-file", type=str, default=None, help="Custom output image path")
 
+    sub_diff = subparsers.add_parser("diff", parents=[common_sub], help="Compute visual delta between asset builds")
+    sub_diff.add_argument("recipe", type=str, help="Recipe name to diff")
+    sub_diff.add_argument("--target", type=str, default=None, help="Reference image to compare against")
+    sub_diff.add_argument("--out-diff", type=str, default=None, help="Output path for visual diff map image")
+
     sub_build = subparsers.add_parser("build", parents=[common_sub], help="Build art recipes")
     sub_build.add_argument("recipes", nargs="*", default=[], help="Specific recipes to build (omit for all)")
     sub_build.add_argument("--incremental", "-i", action="store_true", default=argparse.SUPPRESS, help="Build only modified recipes")
@@ -1337,6 +1354,18 @@ def main(argv: list[str]) -> int:
         scale_val = getattr(args, "scale", 4)
         out_file_val = getattr(args, "out_file", None)
         return inspect_tool.cmd_inspect(recipe_target, scale=scale_val, out_file=out_file_val, as_json=as_json)
+    elif cmd == "diff":
+        import diff_tool
+        recipe_target = getattr(args, "recipe", None)
+        target_val = getattr(args, "target", None)
+        out_diff_val = getattr(args, "out_diff", None)
+        if not recipe_target:
+            if as_json:
+                print(json.dumps({"status": "error", "message": "Recipe name is required for diff"}, indent=2))
+            else:
+                print("[artkit] Error: Recipe name is required. Usage: midev diff <recipe>")
+            return 1
+        return diff_tool.cmd_diff(recipe_target, target=target_val, out_diff=out_diff_val, as_json=as_json)
     elif cmd == "project":
         action = getattr(args, "sub_action", "list")
         pname = getattr(args, "proj_name", None)

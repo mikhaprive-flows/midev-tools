@@ -6,6 +6,8 @@ Usage:
   python midev.py build [recipe ...]              # build specified (or all) recipes
   python midev.py build --incremental             # build only modified recipes
   python midev.py build --clean                    # clean output before building
+  python midev.py inspect [recipe]                 # generate multimodal visual verification sheet
+  python midev.py diff <recipe>                    # compute visual delta between builds
   python midev.py watch [recipe]                   # start live file watcher with hot-reloading
   python midev.py studio [--port 8080]             # start interactive Live Preview Studio web UI
   python midev.py palette [list|inspect <name>]   # inspect available color palettes
