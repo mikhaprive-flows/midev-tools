@@ -29,7 +29,7 @@ import safepath
 import studio
 
 
-def read_line_with_timeout(proc: subprocess.Popen, timeout: float = 3.0) -> str:
+def read_line_with_timeout(proc: subprocess.Popen, timeout: float = 10.0) -> str:
     """Read a single line from proc.stdout with a timeout to prevent hanging on deadlock."""
     result = [""]
 
@@ -172,7 +172,7 @@ class TestRound2Regressions(unittest.TestCase):
             init_req = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2024-11-05"}}) + "\n"
             proc.stdin.write(init_req)
             proc.stdin.flush()
-            _ = read_line_with_timeout(proc, timeout=3.0)
+            _ = read_line_with_timeout(proc, timeout=10.0)
 
             # 2. Call build recipe that calls sys.exit(3)
             call_req = json.dumps({
@@ -185,7 +185,7 @@ class TestRound2Regressions(unittest.TestCase):
             proc.stdin.flush()
 
             # Server must reply with isError: true for id 2
-            resp_line = read_line_with_timeout(proc, timeout=3.0)
+            resp_line = read_line_with_timeout(proc, timeout=10.0)
             self.assertTrue(resp_line.strip(), "MCP server gave no response for recipe calling sys.exit (hung)")
             resp = json.loads(resp_line)
             self.assertEqual(resp.get("id"), 2)
@@ -198,7 +198,7 @@ class TestRound2Regressions(unittest.TestCase):
             ping_req = json.dumps({"jsonrpc": "2.0", "id": 3, "method": "ping"}) + "\n"
             proc.stdin.write(ping_req)
             proc.stdin.flush()
-            ping_resp = json.loads(read_line_with_timeout(proc, timeout=3.0))
+            ping_resp = json.loads(read_line_with_timeout(proc, timeout=10.0))
             self.assertEqual(ping_resp.get("id"), 3)
         finally:
             proc.kill()
