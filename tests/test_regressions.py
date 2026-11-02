@@ -262,7 +262,7 @@ class TestRegressions(unittest.TestCase):
         # Second build with incremental: must rebuild, not skip
         code2, out2, _ = run_cli(["build", "player", "--incremental", "--json"], cwd=repo)
         self.assertEqual(code2, 0)
-        data = json.loads(out2.strip().splitlines()[-1])
+        data = json.loads(out2.strip())
         self.assertIn("player", data.get("built", []), "Recipe should be rebuilt after pixelkit changed")
 
     def test_cache_detects_missing_output(self):
@@ -278,7 +278,7 @@ class TestRegressions(unittest.TestCase):
 
         code2, out2, _ = run_cli(["build", "player", "--incremental", "--json"], cwd=repo)
         self.assertEqual(code2, 0)
-        data = json.loads(out2.strip().splitlines()[-1])
+        data = json.loads(out2.strip())
         self.assertIn("player", data.get("built", []), "Recipe should rebuild when output is missing")
 
     def test_cache_isolated_per_project(self):
@@ -290,7 +290,7 @@ class TestRegressions(unittest.TestCase):
         run_cli(["project", "create", "proj_b", "--starter", "minimal"], cwd=repo)
         code, out, _ = run_cli(["build", "--project", "proj_b", "--incremental", "--json"], cwd=repo)
         self.assertEqual(code, 0)
-        data = json.loads(out.strip().splitlines()[-1])
+        data = json.loads(out.strip())
         self.assertGreater(len(data.get("built", [])), 0, "Second project must build even if recipe names match")
 
     # -------------------------------------------------------------------------

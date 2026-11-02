@@ -108,9 +108,16 @@ def main():
         tests_dir = ROOT_DIR / "tests"
         if not tests_dir.exists():
             tests_dir.mkdir(parents=True, exist_ok=True)
-        print(f"[midev] Running test suite via unittest discovery in {tests_dir}...")
+        if str(tests_dir) not in sys.path:
+            sys.path.insert(0, str(tests_dir))
+        test_args = [a for a in argv[1:] if not a.startswith("-")]
         loader = unittest.defaultTestLoader
-        suite = loader.discover(str(tests_dir), pattern="test_*.py")
+        if test_args:
+            print(f"[midev] Running tests: {test_args}...")
+            suite = loader.loadTestsFromNames(test_args)
+        else:
+            print(f"[midev] Running test suite via unittest discovery in {tests_dir}...")
+            suite = loader.discover(str(tests_dir), pattern="test_*.py")
         runner = unittest.TextTestRunner(verbosity=2)
         result = runner.run(suite)
         return 0 if result.wasSuccessful() else 1

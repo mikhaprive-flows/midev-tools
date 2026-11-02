@@ -68,7 +68,7 @@ def run_cli(
     Returns (exit_code, stdout, stderr).
     """
     target_cwd = cwd or REPO_ROOT
-    py_bin = str(sys.executable)
+    py_bin = str(get_venv_python())
     cmd = [py_bin, str(target_cwd / "midev.py"), *args]
 
     run_env = os.environ.copy()

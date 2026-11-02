@@ -226,6 +226,19 @@ def _clean_recipe_output(stem: str, target_dir: Path):
                     pass
 
 
+def _find_recipe_outputs(stem: str, *target_dirs: Path) -> list[Path]:
+    """Find all output files created for recipe in target directories."""
+    outputs: list[Path] = []
+    for d in target_dirs:
+        if d.exists():
+            for f in d.rglob("*"):
+                if f.is_file() and not f.name.startswith("."):
+                    if f.stem == stem or f.stem.startswith(f"{stem}_") or f.name.startswith(f"{stem}."):
+                        outputs.append(f)
+    return outputs
+
+
+
 def validate_assets(target_dir: Path | None = None) -> ValidationResult:
     """Validate output PNG assets against active palette, alpha, and geometry rules."""
     from pixelkit import PAL
@@ -334,8 +347,11 @@ def build_recipes(
     out = out_dir or CURRENT_OUT_DIR
     prev = preview_dir or CURRENT_PREVIEW_DIR
 
+    cache_file = out / ".midev-cache.json"
+    cache = BuildCache(cache_file=cache_file, project_id=proj_id)
+
     if clean:
-        CACHE.clear()
+        cache.clear()
         try:
             safe_clean_output_dir(out)
             safe_clean_output_dir(prev)
@@ -350,12 +366,13 @@ def build_recipes(
             )
 
     pal_key = pixelkit.PAL.path.stem if (pixelkit.PAL and pixelkit.PAL.path) else "default"
+    pal_path = pixelkit.PAL.path if (pixelkit.PAL and pixelkit.PAL.path) else None
     exps = pixelkit.ACTIVE_EXPORTERS
 
     if incremental and not force:
         to_build = []
         for p in todo:
-            if CACHE.is_dirty(p, pal_key, exps):
+            if cache.is_dirty(p, palette=pal_key, exporters=exps, palette_path=pal_path):
                 to_build.append(p)
             else:
                 skipped.append(p.stem)
@@ -378,7 +395,8 @@ def build_recipes(
         try:
             mod = load(p)
             mod.build(ctx)
-            CACHE.record(p, pal_key, exps)
+            recipe_outputs = _find_recipe_outputs(p.stem, ctx.assets, ctx.preview)
+            cache.record(p, palette=pal_key, exporters=exps, palette_path=pal_path, output_files=recipe_outputs)
             built.append(p.stem)
         except Exception as e:
             tb = traceback.format_exc()
@@ -390,7 +408,7 @@ def build_recipes(
             _clean_recipe_output(p.stem, ctx.assets)
             _clean_recipe_output(p.stem, ctx.preview)
 
-    CACHE.save()
+    cache.save()
 
     val = validate_assets(ctx.assets)
     is_ok = len(errors) == 0 and val.violations == 0 and val.status == "passed"
